@@ -13,6 +13,7 @@ import {
 import { generateUUID } from "@/utils/uuid";
 import { openclawKeys } from "@/hooks/useOpenClaw";
 import { invalidateHermesProviderCaches } from "@/hooks/useHermes";
+import { invalidateKimiProviderCaches } from "@/hooks/useKimi";
 import { proxyKeys } from "@/lib/query/proxy";
 import { usageKeys } from "@/lib/query/usage";
 import { sessionKeys } from "@/lib/query/sessions";
@@ -124,6 +125,10 @@ export const useAddProviderMutation = (appId: AppId) => {
       if (appId === "hermes") {
         await invalidateHermesProviderCaches(queryClient);
       }
+      if (appId === "kimi") {
+        await invalidateKimiProviderCaches(queryClient);
+      }
+
       try {
         await providersApi.updateTrayMenu();
       } catch (trayError) {
@@ -270,6 +275,10 @@ export const useDeleteProviderMutation = (appId: AppId) => {
       if (appId === "hermes") {
         await invalidateHermesProviderCaches(queryClient);
       }
+      if (appId === "kimi") {
+        await invalidateKimiProviderCaches(queryClient);
+      }
+
       try {
         await providersApi.updateTrayMenu();
       } catch (trayError) {
@@ -357,6 +366,10 @@ export const useSwitchProviderMutation = (appId: AppId) => {
       if (appId === "hermes") {
         await invalidateHermesProviderCaches(queryClient);
       }
+      if (appId === "kimi") {
+        await invalidateKimiProviderCaches(queryClient);
+      }
+
       try {
         await providersApi.updateTrayMenu();
       } catch (trayError) {

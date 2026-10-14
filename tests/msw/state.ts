@@ -12,7 +12,7 @@ type ProvidersByApp = Record<AppId, Record<string, Provider>>;
 type CurrentProviderState = Record<AppId, string>;
 type McpConfigState = Record<AppId, Record<string, McpServer>>;
 type LiveProviderIdsByApp = Record<
-  "opencode" | "openclaw" | "hermes",
+  "opencode" | "openclaw" | "hermes" | "kimi",
   string[]
 >;
 
@@ -75,6 +75,7 @@ const createDefaultProviders = (): ProvidersByApp => ({
   hermes: {},
   pi: {},
   mcode: {},
+  kimi: {},
 });
 
 const createDefaultCurrent = (): CurrentProviderState => ({
@@ -88,6 +89,7 @@ const createDefaultCurrent = (): CurrentProviderState => ({
   hermes: "",
   pi: "",
   mcode: "",
+  kimi: "",
 });
 
 let providers = createDefaultProviders();
@@ -96,6 +98,7 @@ let liveProviderIds: LiveProviderIdsByApp = {
   opencode: [],
   openclaw: [],
   hermes: [],
+  kimi: [],
 };
 let settingsState: Settings = {
   showInTray: true,
@@ -169,6 +172,7 @@ let mcpConfigs: McpConfigState = {
         opencode: false,
         openclaw: false,
         hermes: false,
+        kimi: false,
       },
       server: {
         type: "stdio",
@@ -189,6 +193,7 @@ let mcpConfigs: McpConfigState = {
         opencode: false,
         openclaw: false,
         hermes: false,
+        kimi: false,
       },
       server: {
         type: "http",
@@ -203,6 +208,7 @@ let mcpConfigs: McpConfigState = {
   hermes: {},
   pi: {},
   mcode: {},
+  kimi: {},
 };
 
 const cloneProviders = (value: ProvidersByApp) =>
@@ -271,6 +277,7 @@ export const resetProviderState = () => {
     opencode: [],
     openclaw: [],
     hermes: [],
+    kimi: [],
   };
   sessionsState = createDefaultSessions();
   sessionMessagesState = createDefaultSessionMessages();
@@ -296,6 +303,7 @@ export const resetProviderState = () => {
           opencode: false,
           openclaw: false,
           hermes: false,
+          kimi: false,
         },
         server: {
           type: "stdio",
@@ -316,6 +324,7 @@ export const resetProviderState = () => {
           opencode: false,
           openclaw: false,
           hermes: false,
+          kimi: false,
         },
         server: {
           type: "http",
@@ -330,6 +339,7 @@ export const resetProviderState = () => {
     hermes: {},
     pi: {},
     mcode: {},
+    kimi: {},
   };
 };
 

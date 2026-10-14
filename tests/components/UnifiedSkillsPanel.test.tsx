@@ -143,6 +143,7 @@ const makeSkill = (overrides: Overrides = {}): InstalledSkill => {
       openclaw: false,
       hermes: false,
       pi: false,
+      kimi: false,
       ...apps,
     },
     installedAt: 1,
@@ -897,6 +898,7 @@ describe("UnifiedSkillsPanel", () => {
           hermes: false,
           pi: false,
           mcode: false,
+          kimi: false,
         },
       },
     ]);

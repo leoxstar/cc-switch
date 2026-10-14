@@ -154,6 +154,15 @@ pub async fn get_config_status(
                 path,
             })
         }
+        AppType::Kimi => {
+            let config_path = crate::kimi_config::get_kimi_config_path();
+            let exists = config_path.exists();
+            let path = crate::kimi_config::get_kimi_dir()
+                .to_string_lossy()
+                .to_string();
+
+            Ok(ConfigStatus { exists, path })
+        }
     }
 }
 
@@ -180,6 +189,7 @@ pub async fn get_config_dir(app: String) -> Result<String, String> {
             .parent()
             .unwrap()
             .to_path_buf(),
+        AppType::Kimi => crate::kimi_config::get_kimi_dir(),
     };
 
     Ok(dir.to_string_lossy().to_string())
@@ -203,6 +213,7 @@ pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, 
             .parent()
             .unwrap()
             .to_path_buf(),
+        AppType::Kimi => crate::kimi_config::get_kimi_dir(),
     };
 
     if !config_dir.exists() {

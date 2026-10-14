@@ -38,6 +38,7 @@ import { checkAllEnvConflicts, checkEnvConflicts } from "@/lib/api/env";
 import { useProviderActions } from "@/hooks/useProviderActions";
 import { openclawKeys, useOpenClawHealth } from "@/hooks/useOpenClaw";
 import { hermesKeys, useOpenHermesWebUI } from "@/hooks/useHermes";
+import { invalidateKimiProviderCaches, kimiKeys } from "@/hooks/useKimi";
 import { hermesApi } from "@/lib/api/hermes";
 import type { ProviderEditorSave } from "@/lib/api/providers";
 import { useProxyStatus } from "@/hooks/useProxyStatus";
@@ -322,6 +323,7 @@ function App() {
   const isOpenClawView = activeApp === "openclaw" && isAppPage(currentView);
   const { data: openclawHealthWarnings = [] } =
     useOpenClawHealth(isOpenClawView);
+
   const {
     addProvider,
     updateProvider,
@@ -838,6 +840,8 @@ function App() {
         await queryClient.invalidateQueries({
           queryKey: ["providers", "mcode"],
         });
+      } else if (activeApp === "kimi") {
+        await invalidateKimiProviderCaches(queryClient);
       }
       toast.success(
         activeApp === "pi"
@@ -926,7 +930,8 @@ function App() {
       activeApp === "opencode" ||
       activeApp === "openclaw" ||
       activeApp === "hermes" ||
-      activeApp === "pi"
+      activeApp === "pi" ||
+      activeApp === "kimi"
     ) {
       let liveProviderIds: string[] = [];
       try {
@@ -946,12 +951,17 @@ function App() {
                     queryKey: hermesKeys.liveProviderIds,
                     queryFn: () => providersApi.getHermesLiveProviderIds(),
                   })
-                : (
-                    await queryClient.ensureQueryData({
-                      queryKey: ["pi", "currentState"],
-                      queryFn: () => piApi.getCurrentState(),
+                : activeApp === "kimi"
+                  ? await queryClient.ensureQueryData({
+                      queryKey: kimiKeys.liveProviderIds,
+                      queryFn: () => providersApi.getKimiLiveProviderIds(),
                     })
-                  ).enabledProviderIds;
+                  : (
+                      await queryClient.ensureQueryData({
+                        queryKey: ["pi", "currentState"],
+                        queryFn: () => piApi.getCurrentState(),
+                      })
+                    ).enabledProviderIds;
       } catch (error) {
         console.error(
           "[App] Failed to load live provider IDs for duplication",

@@ -31,6 +31,10 @@ import {
   useHermesLiveProviderIds,
   useHermesModelConfig,
 } from "@/hooks/useHermes";
+import {
+  useKimiLiveProviderIds,
+  useKimiCurrentProviderId,
+} from "@/hooks/useKimi";
 import { useStreamCheck } from "@/hooks/useStreamCheck";
 import { ProviderCard } from "@/components/providers/ProviderCard";
 import { ProviderEmptyState } from "@/components/providers/ProviderEmptyState";
@@ -123,6 +127,18 @@ export function ProviderList({
   const { data: hermesLiveIds, isPending: isHermesLiveIdsPending } =
     useHermesLiveProviderIds(appId === "hermes");
   const { data: hermesModelConfig } = useHermesModelConfig(appId === "hermes");
+  const { data: kimiLiveIds, isPending: isKimiLiveIdsPending } =
+    useKimiLiveProviderIds(appId === "kimi");
+  const { data: kimiCurrentProviderId } = useKimiCurrentProviderId(
+    appId === "kimi",
+  );
+  const isKimiCurrent = useCallback(
+    (providerId: string): boolean => {
+      if (appId !== "kimi") return false;
+      return kimiCurrentProviderId === providerId;
+    },
+    [appId, kimiCurrentProviderId],
+  );
   const { data: openclawDefaultModel } = useOpenClawDefaultModel(
     appId === "openclaw",
   );
@@ -144,6 +160,7 @@ export function ProviderList({
     (appId === "opencode" && isOpencodeLiveIdsPending) ||
     (appId === "openclaw" && isOpenclawLiveIdsPending) ||
     (appId === "hermes" && isHermesLiveIdsPending) ||
+    (appId === "kimi" && isKimiLiveIdsPending) ||
     (appId === "pi" && isPiCurrentStatePending);
 
   const isInConfig = useCallback(
@@ -157,6 +174,8 @@ export function ProviderList({
           return openclawLiveIds?.includes(provider.id) ?? false;
         case "hermes":
           return hermesLiveIds?.includes(provider.id) ?? false;
+        case "kimi":
+          return kimiLiveIds?.includes(provider.id) ?? false;
         case "pi":
           return isPiStateReady
             ? (piCurrentState?.enabledProviderIds.includes(provider.id) ??
@@ -171,6 +190,7 @@ export function ProviderList({
       opencodeLiveIds,
       openclawLiveIds,
       hermesLiveIds,
+      kimiLiveIds,
       isPiStateReady,
       piCurrentState,
     ],
@@ -194,6 +214,10 @@ export function ProviderList({
       }
       if (appId === "hermes") {
         return (await providersApi.importHermesFromLive()) > 0;
+      }
+      if (appId === "kimi") {
+        const count = await providersApi.importKimiFromLive();
+        return count > 0;
       }
       if (appId === "claude-desktop") {
         return (await providersApi.importClaudeDesktopFromClaude()) > 0;
@@ -432,6 +456,7 @@ export function ProviderList({
     if (provider.category === "omo-slim")
       return provider.id === currentOmoSlimId;
     if (appId === "hermes") return provider.id === hermesModelConfig?.provider;
+    if (appId === "kimi") return isKimiCurrent(provider.id);
     return provider.id === currentProviderId;
   };
 
