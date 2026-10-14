@@ -72,6 +72,7 @@ describe("useDirectorySettings", () => {
       if (app === "grokbuild") return "/remote/grok";
       if (app === "opencode") return "/remote/opencode";
       if (app === "openclaw") return "/remote/openclaw";
+      if (app === "dsh") return "/remote/dsh";
       if (app === "pi") return "/remote/pi";
       if (app === "kimi") return "/remote/kimi";
       return "/remote/hermes";
@@ -99,6 +100,7 @@ describe("useDirectorySettings", () => {
       opencode: "/remote/opencode",
       openclaw: "/remote/openclaw",
       hermes: "/remote/hermes",
+      dsh: "/remote/dsh",
       pi: "/remote/pi",
       kimi: "/remote/kimi",
     });

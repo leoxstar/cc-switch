@@ -94,6 +94,7 @@ const APP_SHORT_NAME: Record<AppId, string> = {
   opencode: "OpenCode",
   openclaw: "OpenClaw",
   hermes: "Hermes",
+  dsh: "DSH",
   pi: "Pi",
   mcode: "MiniMax",
   kimi: "Kimi",

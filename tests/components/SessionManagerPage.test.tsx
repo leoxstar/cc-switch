@@ -286,6 +286,7 @@ describe("SessionManagerPage", () => {
         opencode: false,
         openclaw: false,
         hermes: false,
+        dsh: false,
         pi: false,
         mcode: false,
         kimi: false,

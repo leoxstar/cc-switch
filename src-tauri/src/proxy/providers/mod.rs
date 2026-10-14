@@ -219,6 +219,7 @@ impl ProviderType {
                 ProviderType::Codex
             }
             AppType::Pi | AppType::Mcode => return None,
+            AppType::Dsh => ProviderType::Codex,
         };
         Some(provider_type)
     }
@@ -277,6 +278,7 @@ pub fn get_adapter(app_type: &AppType) -> Option<Box<dyn ProviderAdapter>> {
             Box::new(CodexAdapter::new())
         }
         AppType::Pi | AppType::Mcode => return None,
+        AppType::Dsh => Box::new(CodexAdapter::new()),
     })
 }
 

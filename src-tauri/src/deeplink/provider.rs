@@ -329,6 +329,7 @@ pub(crate) fn build_provider_from_request(
         AppType::OpenClaw => build_additive_app_settings(request, api_format),
         AppType::Hermes => build_hermes_settings(request, api_format),
         AppType::Pi => build_pi_settings(request, api_format)?,
+        AppType::Dsh => build_dsh_settings(request),
         AppType::Mcode => {
             return Err(AppError::InvalidInput(
                 "Add MCode providers from the MCode page".into(),
@@ -829,6 +830,35 @@ fn build_additive_app_settings(
 /// protocol) and let the user adjust via the UI after import. We never rely
 /// on Hermes' built-in URL heuristics, which only recognize a handful of
 /// official endpoints.
+fn build_dsh_settings(request: &DeepLinkImportRequest) -> serde_json::Value {
+    let endpoint = get_primary_endpoint(request);
+
+    let mut config = serde_json::Map::new();
+
+    if let Some(name) = request.name.as_deref().filter(|s| !s.is_empty()) {
+        config.insert("displayName".to_string(), json!(name));
+    }
+
+    if !endpoint.is_empty() {
+        config.insert("baseURL".to_string(), json!(endpoint));
+    }
+
+    config.insert("api".to_string(), json!("openai-completions"));
+
+    if let Some(api_key) = &request.api_key {
+        config.insert("apiKey".to_string(), json!(api_key));
+    }
+
+    if let Some(model) = &request.model {
+        config.insert(
+            "models".to_string(),
+            json!([{ "id": model, "reasoningEfforts": { "off": null, "low": "low", "high": "high" } }]),
+        );
+    }
+
+    json!(config)
+}
+
 fn build_hermes_settings(
     request: &DeepLinkImportRequest,
     api_format: Option<ApiFormat>,

@@ -46,6 +46,8 @@ pub struct VisibleApps {
     pub openclaw: bool,
     #[serde(default)]
     pub hermes: bool,
+    #[serde(default)]
+    pub dsh: bool,
     #[serde(default = "default_true")]
     pub pi: bool,
     #[serde(default = "default_true")]
@@ -65,6 +67,7 @@ impl Default for VisibleApps {
             opencode: true,
             openclaw: true,
             hermes: false, // 默认不显示，需用户手动启用
+            dsh: false,    // 默认不显示，需用户手动启用
             pi: true,
             mcode: true,
             kimi: true,    // 默认显示
@@ -84,6 +87,7 @@ impl VisibleApps {
             AppType::OpenCode => self.opencode,
             AppType::OpenClaw => self.openclaw,
             AppType::Hermes => self.hermes,
+            AppType::Dsh => self.dsh,
             AppType::Pi => self.pi,
             AppType::Mcode => self.mcode,
             AppType::Kimi => self.kimi,
@@ -484,6 +488,8 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hermes_config_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dsh_config_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pi_config_dir: Option<String>,
     pub kimi_config_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -517,6 +523,9 @@ pub struct AppSettings {
     /// 当前 Kimi 供应商 ID（本地存储，保持结构一致）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_provider_kimi: Option<String>,
+    /// 当前 DSH 供应商 ID（本地存储，保持结构一致）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_provider_dsh: Option<String>,
 
     // ===== 本地路由（设备级）=====
     /// 写给客户端的代理主机（IP 或主机名），空/未设时按监听地址推（`0.0.0.0` → `127.0.0.1`）。
@@ -617,6 +626,7 @@ impl Default for AppSettings {
             opencode_config_dir: None,
             openclaw_config_dir: None,
             hermes_config_dir: None,
+            dsh_config_dir: None,
             pi_config_dir: None,
             kimi_config_dir: None,
             deepseek_harness_session_dir: None,
@@ -630,6 +640,7 @@ impl Default for AppSettings {
             current_provider_hermes: None,
             proxy_client_host: None,
             current_provider_kimi: None,
+            current_provider_dsh: None,
             skill_sync_method: SyncMethod::default(),
             skill_storage_location: SkillStorageLocation::default(),
             webdav_sync: None,
@@ -703,6 +714,13 @@ impl AppSettings {
 
         self.hermes_config_dir = self
             .hermes_config_dir
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+
+        self.dsh_config_dir = self
+            .dsh_config_dir
             .as_ref()
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
@@ -1096,6 +1114,14 @@ pub fn get_hermes_override_dir() -> Option<PathBuf> {
         .map(|p| resolve_override_path(p))
 }
 
+pub fn get_dsh_override_dir() -> Option<PathBuf> {
+    let settings = settings_store().read().ok()?;
+    settings
+        .dsh_config_dir
+        .as_ref()
+        .map(|p| resolve_override_path(p))
+}
+
 pub fn get_pi_override_dir() -> Option<PathBuf> {
     let settings = settings_store().read().ok()?;
     settings
@@ -1169,6 +1195,7 @@ pub fn get_current_provider(app_type: &AppType) -> Option<String> {
         AppType::Hermes => settings.current_provider_hermes.clone(),
         AppType::Pi | AppType::Mcode => None,
         AppType::Kimi => settings.current_provider_kimi.clone(),
+        AppType::Dsh => settings.current_provider_dsh.clone(),
     }
 }
 
@@ -1189,6 +1216,7 @@ pub fn set_current_provider(app_type: &AppType, id: Option<&str>) -> Result<(), 
         AppType::Hermes => settings.current_provider_hermes = id_owned.clone(),
         AppType::Pi | AppType::Mcode => {}
         AppType::Kimi => settings.current_provider_kimi = id_owned.clone(),
+        AppType::Dsh => settings.current_provider_dsh = id_owned.clone(),
     })
 }
 

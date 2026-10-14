@@ -14,6 +14,7 @@ type AppDirectoryKey =
   | "opencode"
   | "openclaw"
   | "hermes"
+  | "dsh"
   | "pi"
   | "kimi";
 type ExtraDirectoryKey = "deepseekHarnessSession";
@@ -28,6 +29,7 @@ export interface ResolvedDirectories {
   opencode: string;
   openclaw: string;
   hermes: string;
+  dsh: string;
   pi: string;
   kimi: string;
   deepseekHarnessSession: string;
@@ -45,6 +47,7 @@ const APP_DIRECTORY_META: Record<
   opencode: { key: "opencode", defaultFolder: ".config/opencode" },
   openclaw: { key: "openclaw", defaultFolder: ".openclaw" },
   hermes: { key: "hermes", defaultFolder: ".hermes" },
+  dsh: { key: "dsh", defaultFolder: ".dsh" },
   pi: { key: "pi", defaultFolder: ".pi/agent" },
   kimi: { key: "kimi", defaultFolder: ".kimi-code" },
 };
@@ -60,6 +63,7 @@ const DIRECTORY_KEY_TO_SETTINGS_FIELD: Record<
   opencode: "opencodeConfigDir",
   openclaw: "openclawConfigDir",
   hermes: "hermesConfigDir",
+  dsh: "dshConfigDir",
   pi: "piConfigDir",
   kimi: "kimiConfigDir",
 };
@@ -168,6 +172,7 @@ export function useDirectorySettings({
     opencode: "",
     openclaw: "",
     hermes: "",
+    dsh: "",
     pi: "",
     kimi: "",
     deepseekHarnessSession: "",
@@ -183,6 +188,7 @@ export function useDirectorySettings({
     opencode: "",
     openclaw: "",
     hermes: "",
+    dsh: "",
     pi: "",
     kimi: "",
     deepseekHarnessSession: "",
@@ -214,6 +220,7 @@ export function useDirectorySettings({
           opencodeDir,
           openclawDir,
           hermesDir,
+          dshDir,
           piDir,
           kimiDir,
           defaultAppConfig,
@@ -224,6 +231,7 @@ export function useDirectorySettings({
           defaultOpencodeDir,
           defaultOpenclawDir,
           defaultHermesDir,
+          defaultDshDir,
           defaultPiDir,
           defaultKimiDir,
           defaultDeepseekHarnessSessionDir,
@@ -236,6 +244,7 @@ export function useDirectorySettings({
           settingsApi.getConfigDir("opencode"),
           settingsApi.getConfigDir("openclaw"),
           settingsApi.getConfigDir("hermes"),
+          settingsApi.getConfigDir("dsh"),
           settingsApi.getConfigDir("pi"),
           settingsApi.getConfigDir("kimi"),
           computeDefaultAppConfigDir(),
@@ -246,6 +255,7 @@ export function useDirectorySettings({
           computeDefaultConfigDir("opencode"),
           computeDefaultConfigDir("openclaw"),
           computeDefaultConfigDir("hermes"),
+          computeDefaultConfigDir("dsh"),
           computeDefaultConfigDir("pi"),
           computeDefaultConfigDir("kimi"),
           computeDefaultDeepseekHarnessSessionDir(),
@@ -264,6 +274,7 @@ export function useDirectorySettings({
           opencode: defaultOpencodeDir ?? "",
           openclaw: defaultOpenclawDir ?? "",
           hermes: defaultHermesDir ?? "",
+          dsh: defaultDshDir ?? "",
           pi: defaultPiDir ?? "",
           kimi: defaultKimiDir ?? "",
           deepseekHarnessSession: defaultDeepseekHarnessSessionDir ?? "",
@@ -281,6 +292,7 @@ export function useDirectorySettings({
           opencode: opencodeDir || defaultsRef.current.opencode,
           openclaw: openclawDir || defaultsRef.current.openclaw,
           hermes: hermesDir || defaultsRef.current.hermes,
+          dsh: dshDir || defaultsRef.current.dsh,
           pi: piDir || defaultsRef.current.pi,
           kimi: kimiDir || defaultsRef.current.kimi,
           deepseekHarnessSession:
@@ -552,6 +564,7 @@ export function useDirectorySettings({
         opencode: overrides?.opencode ?? defaultsRef.current.opencode,
         openclaw: overrides?.openclaw ?? defaultsRef.current.openclaw,
         hermes: overrides?.hermes ?? defaultsRef.current.hermes,
+        dsh: overrides?.dsh ?? defaultsRef.current.dsh,
         pi: overrides?.pi ?? defaultsRef.current.pi,
         kimi: overrides?.kimi ?? defaultsRef.current.kimi,
         deepseekHarnessSession:

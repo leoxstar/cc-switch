@@ -41,6 +41,7 @@ impl McpApps {
             AppType::Mcode => self.mcode,
             AppType::Pi => self.pi,
             AppType::Kimi => self.kimi,
+            AppType::Dsh => false, // DSH 的 MCP 走 profile cordis patch，还没有配置文件同步
             AppType::ClaudeDesktop => false,
         }
     }
@@ -58,6 +59,7 @@ impl McpApps {
             AppType::Mcode => self.mcode = enabled,
             AppType::Pi => self.pi = enabled,
             AppType::Kimi => self.kimi = enabled,
+            AppType::Dsh => {} // DSH 的 MCP 走 profile cordis patch，还没有配置文件同步
             AppType::ClaudeDesktop => {} // Claude Desktop 3P provider config doesn't support MCP here
         }
     }
@@ -142,6 +144,7 @@ impl SkillApps {
             AppType::GrokBuild => self.grokbuild,
             AppType::OpenCode => self.opencode,
             AppType::Hermes => self.hermes,
+            AppType::Dsh => false, // DSH skills are package-managed (dsh-architect-skills); no file sync.
             AppType::Pi => self.pi,
             AppType::Mcode => self.mcode,
             AppType::Kimi => self.kimi,
@@ -159,6 +162,7 @@ impl SkillApps {
             AppType::GrokBuild => self.grokbuild = enabled,
             AppType::OpenCode => self.opencode = enabled,
             AppType::Hermes => self.hermes = enabled,
+            AppType::Dsh => {} // DSH skills are package-managed; no file sync.
             AppType::Pi => self.pi = enabled,
             AppType::Mcode => self.mcode = enabled,
             AppType::Kimi => self.kimi = enabled,
@@ -435,6 +439,7 @@ pub enum AppType {
     OpenCode,
     OpenClaw,
     Hermes,
+    Dsh,
     Pi,
     Mcode,
     Kimi,
@@ -451,6 +456,7 @@ impl AppType {
             AppType::OpenCode => "opencode",
             AppType::OpenClaw => "openclaw",
             AppType::Hermes => "hermes",
+            AppType::Dsh => "dsh",
             AppType::Pi => "pi",
             AppType::Mcode => "mcode",
             AppType::Kimi => "kimi",
@@ -461,13 +467,14 @@ impl AppType {
     ///
     /// - Switch mode (false): Only the current provider is written to live config (Claude, Codex, Gemini)
     /// - Additive mode (true): Providers coexist in native config and can be enabled independently
-    ///   (OpenCode, OpenClaw, Hermes, Pi)
+    ///   (OpenCode, OpenClaw, Hermes, DSH, Pi)
     pub fn is_additive_mode(&self) -> bool {
         matches!(
             self,
             AppType::OpenCode
                 | AppType::OpenClaw
                 | AppType::Hermes
+                | AppType::Dsh
                 | AppType::Pi
                 | AppType::Mcode
                 | AppType::Kimi
@@ -492,6 +499,7 @@ impl AppType {
             AppType::OpenCode,
             AppType::OpenClaw,
             AppType::Hermes,
+            AppType::Dsh,
             AppType::Pi,
             AppType::Mcode,
             AppType::Kimi,
@@ -514,13 +522,14 @@ impl FromStr for AppType {
             "opencode" => Ok(AppType::OpenCode),
             "openclaw" => Ok(AppType::OpenClaw),
             "hermes" => Ok(AppType::Hermes),
+            "dsh" | "deepseek-harness" | "deepseek_harness" => Ok(AppType::Dsh),
             "pi" => Ok(AppType::Pi),
             "mcode" => Ok(AppType::Mcode),
             "kimi" => Ok(AppType::Kimi),
             other => Err(AppError::localized(
                 "unsupported_app",
-                format!("不支持的应用标识: '{other}'。可选值: claude, claude-desktop, codex, gemini, grokbuild, opencode, openclaw, hermes, pi, mcode, kimi。"),
-                format!("Unsupported app id: '{other}'. Allowed: claude, claude-desktop, codex, gemini, grokbuild, opencode, openclaw, hermes, pi, mcode, kimi."),
+                format!("不支持的应用标识: '{other}'。可选值: claude, claude-desktop, codex, gemini, grokbuild, opencode, openclaw, hermes, pi, mcode, kimi, dsh。"),
+                format!("Unsupported app id: '{other}'. Allowed: claude, claude-desktop, codex, gemini, grokbuild, opencode, openclaw, hermes, pi, mcode, kimi, dsh."),
             )),
         }
     }
@@ -565,6 +574,7 @@ impl CommonConfigSnippets {
             AppType::Hermes => self.hermes.as_ref(),
             AppType::Pi | AppType::Mcode => None,
             AppType::Kimi => self.kimi.as_ref(),
+            AppType::Dsh => None, // DSH 还没有「公共配置片段」这块面板
         }
     }
 
@@ -581,6 +591,7 @@ impl CommonConfigSnippets {
             AppType::Hermes => self.hermes = snippet,
             AppType::Pi | AppType::Mcode => {}
             AppType::Kimi => self.kimi = snippet,
+            AppType::Dsh => {} // DSH 还没有「公共配置片段」这块面板
         }
     }
 }
@@ -908,6 +919,9 @@ impl MultiAppConfig {
             AppType::OpenCode => &mut config.prompts.opencode.prompts,
             AppType::OpenClaw => &mut config.prompts.openclaw.prompts,
             AppType::Hermes => &mut config.prompts.hermes.prompts,
+            // DSH prompts target ~/.dsh/AGENTS.md; auto-import is disabled
+            // until the portable kernel (P1) defines its content contract.
+            AppType::Dsh => return Ok(false),
             // Pi was added after prompts moved to SQLite. Keeping it out of
             // this legacy config avoids a second, unused prompt state.
             AppType::Pi | AppType::Mcode => return Ok(false),
@@ -957,6 +971,7 @@ impl MultiAppConfig {
                 AppType::Hermes => continue,   // Hermes didn't exist in v3.6.x, skip
                 AppType::Pi | AppType::Mcode => continue, // Pi didn't exist in v3.6.x, skip
                 AppType::Kimi => continue,     // Kimi didn't exist in v3.6.x, skip
+                AppType::Dsh => continue,      // DSH didn't exist in v3.6.x, skip
             };
 
             for (id, entry) in old_servers {

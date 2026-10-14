@@ -191,6 +191,11 @@ impl McpService {
             AppType::ClaudeDesktop => {
                 log::debug!("Claude Desktop 3P profiles do not use CC Switch MCP sync, skipping");
             }
+            AppType::Dsh => {
+                // DSH mounts MCP servers through profile cordis patches, not a
+                // native config file; file sync is not supported yet.
+                log::debug!("DSH MCP sync is not supported yet, skipping");
+            }
             AppType::Codex => {
                 // Codex uses TOML format, must use the correct function
                 mcp::sync_single_server_to_codex(&Default::default(), &server.id, &server.server)?;
@@ -251,6 +256,11 @@ impl McpService {
             AppType::ClaudeDesktop => {
                 log::debug!("Claude Desktop 3P profiles do not use CC Switch MCP sync, skipping");
             }
+            AppType::Dsh => {
+                // DSH mounts MCP servers through profile cordis patches, not a
+                // native config file; file sync is not supported yet.
+                log::debug!("DSH MCP sync is not supported yet, skipping");
+            }
             AppType::Codex => mcp::remove_server_from_codex(id)?,
             AppType::Gemini => mcp::remove_server_from_gemini(id)?,
             AppType::GrokBuild => mcp::remove_server_from_grokbuild(id)?,
@@ -308,10 +318,16 @@ impl McpService {
         Self::project_servers_to_app(state, &servers, app)
     }
 
-    /// 由 CC Switch 管理 MCP 的应用（Claude Desktop、OpenClaw 不支持）
+    /// 由 CC Switch 管理 MCP 的应用（Claude Desktop、OpenClaw 不支持；DSH 的 MCP 走
+    /// profile cordis patch，也不由这里写文件）
     pub fn live_sync_apps() -> Vec<AppType> {
         AppType::all()
-            .filter(|app| !matches!(app, AppType::OpenClaw | AppType::ClaudeDesktop))
+            .filter(|app| {
+                !matches!(
+                    app,
+                    AppType::OpenClaw | AppType::ClaudeDesktop | AppType::Dsh
+                )
+            })
             .collect()
     }
 

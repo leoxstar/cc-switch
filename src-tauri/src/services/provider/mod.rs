@@ -38,8 +38,9 @@ use crate::store::AppState;
 
 // Re-export sub-module functions for external access
 pub use live::{
-    import_default_config, import_hermes_providers_from_live, import_kimi_providers_from_live,
-    import_openclaw_providers_from_live, import_opencode_providers_from_live, read_live_settings,
+    import_default_config, import_dsh_providers_from_live, import_hermes_providers_from_live,
+    import_kimi_providers_from_live, import_openclaw_providers_from_live,
+    import_opencode_providers_from_live, read_live_settings,
     should_import_default_config_on_startup, sync_current_to_live,
 };
 
@@ -59,8 +60,9 @@ pub(crate) use live::{
 
 // Internal re-exports
 use live::{
-    remove_hermes_provider_from_live, remove_kimi_provider_from_live,
-    remove_openclaw_provider_from_live, remove_opencode_provider_from_live,
+    remove_dsh_provider_from_live, remove_hermes_provider_from_live,
+    remove_kimi_provider_from_live, remove_openclaw_provider_from_live,
+    remove_opencode_provider_from_live,
 };
 use usage::validate_usage_script;
 
@@ -6435,6 +6437,7 @@ impl ProviderService {
                     AppType::Hermes => remove_hermes_provider_from_live(id)?,
                     AppType::Mcode => crate::mcode_config::remove_provider(id)?,
                     AppType::Kimi => remove_kimi_provider_from_live(id)?,
+                    AppType::Dsh => remove_dsh_provider_from_live(id)?,
                     _ => {}
                 }
             }
@@ -6509,6 +6512,9 @@ impl ProviderService {
             }
             AppType::Hermes => {
                 remove_hermes_provider_from_live(id)?;
+            }
+            AppType::Dsh => {
+                remove_dsh_provider_from_live(id)?;
             }
             AppType::Mcode => crate::mcode_config::remove_provider(id)?,
             AppType::Kimi => {
@@ -6752,6 +6758,7 @@ impl ProviderService {
                     AppType::Hermes => remove_hermes_provider_from_live(&provider.id),
                     AppType::Mcode => crate::mcode_config::remove_provider(&provider.id),
                     AppType::Kimi => remove_kimi_provider_from_live(&provider.id),
+                    AppType::Dsh => remove_dsh_provider_from_live(&provider.id),
                     _ => Ok(()),
                 };
 
@@ -6998,7 +7005,8 @@ impl ProviderService {
             AppType::OpenClaw => Self::extract_openclaw_common_config(&provider.settings_config),
             AppType::Hermes => Ok(String::new()), // Hermes doesn't use common config snippets
             AppType::Pi | AppType::Mcode => Ok(String::new()),
-            AppType::Kimi => Ok(String::new()),   // Kimi doesn't use common config snippets
+            AppType::Kimi => Ok(String::new()), // Kimi doesn't use common config snippets
+            AppType::Dsh => Ok(String::new()),  // DSH doesn't use common config snippets
         }
     }
 
@@ -7017,7 +7025,8 @@ impl ProviderService {
             AppType::OpenClaw => Self::extract_openclaw_common_config(settings_config),
             AppType::Hermes => Ok(String::new()), // Hermes doesn't use common config snippets
             AppType::Pi | AppType::Mcode => Ok(String::new()),
-            AppType::Kimi => Ok(String::new()),   // Kimi doesn't use common config snippets
+            AppType::Kimi => Ok(String::new()), // Kimi doesn't use common config snippets
+            AppType::Dsh => Ok(String::new()),  // DSH doesn't use common config snippets
         }
     }
 
@@ -7779,6 +7788,28 @@ impl ProviderService {
                     ));
                 }
             }
+            AppType::Dsh => {
+                // DSH provider block must be an object with a string baseURL.
+                if !provider.settings_config.is_object() {
+                    return Err(AppError::localized(
+                        "provider.dsh.settings.not_object",
+                        "DSH 配置必须是 JSON 对象",
+                        "DSH configuration must be a JSON object",
+                    ));
+                }
+                if provider
+                    .settings_config
+                    .get("baseURL")
+                    .and_then(Value::as_str)
+                    .is_none()
+                {
+                    return Err(AppError::localized(
+                        "provider.dsh.settings.base_url_missing",
+                        format!("供应商 {} 缺少 baseURL 字段", provider.id),
+                        format!("Provider {} is missing the baseURL field", provider.id),
+                    ));
+                }
+            }
             AppType::Mcode => {
                 crate::mcode_config::validate_provider(&provider.id, &provider.settings_config)?
             }
@@ -7986,7 +8017,7 @@ impl ProviderService {
 
                 Ok((api_key, base_url))
             }
-            AppType::OpenClaw | AppType::Hermes | AppType::Pi | AppType::Mcode => {
+            AppType::OpenClaw | AppType::Hermes | AppType::Dsh | AppType::Pi | AppType::Mcode => {
                 // These native formats use apiKey and baseUrl directly on the object.
                 let api_key = provider
                     .settings_config

@@ -25,6 +25,7 @@ export const APP_IDS: AppId[] = [
   "opencode",
   "openclaw",
   "hermes",
+  "dsh",
   "pi",
   "mcode",
   "kimi",
@@ -39,6 +40,7 @@ export const DEFAULT_VISIBLE_APPS: VisibleApps = {
   opencode: true,
   openclaw: true,
   hermes: true,
+  dsh: false,
   pi: true,
   mcode: true,
   kimi: true,
@@ -52,6 +54,7 @@ export const SKILLS_APP_IDS: AppId[] = [
   "grokbuild",
   "opencode",
   "hermes",
+  "dsh",
   "pi",
   "mcode",
   "kimi",
@@ -85,7 +88,7 @@ export function isStackAppId(appId: string): appId is StackAppId {
 
 export type AdditiveAppId = Extract<
   AppId,
-  "opencode" | "openclaw" | "hermes" | "pi" | "mcode"
+  "opencode" | "openclaw" | "hermes" | "dsh" | "pi" | "mcode"
 >;
 
 export const ADDITIVE_APP_IDS: AdditiveAppId[] = [
@@ -93,6 +96,7 @@ export const ADDITIVE_APP_IDS: AdditiveAppId[] = [
   "opencode",
   "openclaw",
   "hermes",
+  "dsh",
   "pi",
 ];
 
@@ -115,8 +119,9 @@ export function usesEditorView(appId: AppId): boolean {
   return EDITOR_VIEW_APP_IDS.includes(appId);
 }
 
-/** Claude Desktop、OpenClaw 不由 CC Switch 管理 MCP；Pi 1.0 起内置 MCP（`~/.pi/agent/mcp.json`） */
-export type McpAppId = Exclude<AppId, "claude-desktop" | "openclaw">;
+/** Claude Desktop、OpenClaw 不由 CC Switch 管理 MCP；Pi 1.0 起内置 MCP（`~/.pi/agent/mcp.json`）；
+ *  DSH 的 MCP 走 profile cordis patch，也不由这里写文件。 */
+export type McpAppId = Exclude<AppId, "claude-desktop" | "openclaw" | "dsh">;
 export const MCP_APP_IDS: McpAppId[] = [
   "claude",
   "codex",
@@ -242,6 +247,21 @@ export const APP_ICON_MAP: Record<AppId, AppConfig> = {
       "bg-indigo-400/10 ring-1 ring-indigo-400/20 hover:bg-indigo-400/20 text-indigo-500 dark:text-indigo-300",
     badgeClass:
       "bg-indigo-400/10 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-400/20 border-0 gap-1.5",
+  },
+  dsh: {
+    label: "DSH",
+    icon: (
+      <ProviderIcon
+        icon="deepseek"
+        name="DeepSeek Harness (DSH)"
+        size={14}
+        showFallback={false}
+      />
+    ),
+    activeClass:
+      "bg-teal-500/10 ring-1 ring-teal-500/20 hover:bg-teal-500/20 text-teal-600 dark:text-teal-400",
+    badgeClass:
+      "bg-teal-500/10 text-teal-700 dark:text-teal-300 hover:bg-teal-500/20 border-0 gap-1.5",
   },
 };
 
