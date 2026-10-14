@@ -378,8 +378,13 @@ pub(crate) fn estimated_first_token_ms(
     first_output_ms: i64,
     latency_ms: i64,
 ) -> Option<i64> {
-    let first_token = first_output_ms.checked_sub(start_ms)?;
-    (first_token > 0 && first_token <= latency_ms).then_some(first_token)
+    plausible_first_token_ms(first_output_ms.checked_sub(start_ms)?, latency_ms)
+}
+
+/// 同一个判据，给「已经拿到首字时长、只是没有绝对时刻」的来源用（MCode 的 telemetry
+/// 给的是 request_duration_ms 与 decode_duration_ms 两段时长）。
+pub(crate) fn plausible_first_token_ms(first_token_ms: i64, latency_ms: i64) -> Option<i64> {
+    (first_token_ms > 0 && first_token_ms <= latency_ms).then_some(first_token_ms)
 }
 
 /// 沿父链往上最多走这么多行。

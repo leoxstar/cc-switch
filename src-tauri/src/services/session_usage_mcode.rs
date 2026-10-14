@@ -3,7 +3,13 @@
 //! Models prefer the usage row, then uniquely matched request telemetry, then the
 //! session's effectiveModel. Reconcile the last two days and repair candidates
 //! so late telemetry can fill provisional models without replaying all history.
-//! MCode's thinking time is not TTFT; first_token_ms stays NULL.
+//!
+//! MCode's thinking time is not TTFT: `thinking_duration_ms` is the reasoning part of
+//! the decode phase, sometimes the whole of it. The telemetry does carry a real TTFT，
+//! though — `request_duration_ms` spans the whole call and `decode_duration_ms` is the
+//! streaming window after the first token, so their difference is the wait before it
+//! (that identity held exactly on this machine's 828 assistant rows). Rows without
+//! both fields keep `first_token_ms` NULL.
 use std::collections::{HashMap, HashSet};
 
 use crate::database::{lock_conn, Database};
@@ -13,7 +19,10 @@ use crate::proxy::usage::{
     parser::TokenUsage,
 };
 use crate::services::sql_helpers::INPUT_TOKEN_SEMANTICS_FRESH;
-use crate::services::{session_usage::SessionSyncResult, usage_stats::find_model_pricing};
+use crate::services::{
+    session_usage::{plausible_first_token_ms, SessionSyncResult},
+    usage_stats::find_model_pricing,
+};
 use crate::session_manager::providers::mcode;
 use rusqlite::params;
 use rust_decimal::Decimal;
@@ -34,6 +43,7 @@ struct RequestKey {
 struct RequestMeta {
     model: Option<String>,
     latency_ms: Option<i64>,
+    first_token_ms: Option<i64>,
 }
 
 struct SourceMeta {
@@ -160,6 +170,21 @@ fn load_source_meta(
                         .pointer("/usage/request_duration_ms")
                         .and_then(Value::as_i64)
                         .filter(|&duration| duration > 0),
+                    // 首字 = 整次调用 − 流式窗口。两段都测得出来时才算；推不出来（含旧版
+                    // 按 thinking_duration_ms 写进去的错值）就落 NULL。
+                    first_token_ms: value
+                        .pointer("/usage/request_duration_ms")
+                        .and_then(Value::as_i64)
+                        .filter(|&duration| duration > 0)
+                        .and_then(|request_duration| {
+                            let decode_duration = value
+                                .pointer("/usage/decode_duration_ms")
+                                .and_then(Value::as_i64)?;
+                            plausible_first_token_ms(
+                                request_duration - decode_duration,
+                                request_duration,
+                            )
+                        }),
                 };
                 requests
                     .entry(key)
@@ -297,7 +322,9 @@ fn sync_from_database(
     source: &rusqlite::Connection,
     key: &str,
 ) -> Result<SessionSyncResult, AppError> {
-    let repair_key = format!("{key}:request-cost-repair-v1");
+    // 这个标记的名字就是「本导入器全量对账一次」的版本号：改过解析口径（现在是首字的
+    // 推导方式）就加一版，让每台机器都会重扫一遍历史，而不是只在最近窗口里修。
+    let repair_key = format!("{key}:request-cost-repair-v2");
     let cutoff = chrono::Utc::now().timestamp() - RECONCILE_WINDOW_SECONDS;
     // Release the main database lock before reading or parsing source metadata.
     let (mut cursor, retained, repair_all) = {
@@ -402,30 +429,33 @@ fn sync_from_database(
             .and_then(|meta| meta.latency_ms)
             .or_else(|| existing.map(|log| log.latency_ms))
             .unwrap_or(0);
+        // 首字不回退到已有值：旧版本按思考时长写过错的，reconcile 就是来清它的。
+        let first_token_ms = meta.and_then(|meta| meta.first_token_ms);
         let changed = if existing_model.is_some() {
             // Null-safe comparisons make reconciliation idempotent, including repairs
             // to old turn-level durations and fabricated first-token measurements.
             tx.execute(
                 "UPDATE proxy_request_logs
                  SET model = ?1, request_model = ?1, total_cost_usd = ?2,
-                     latency_ms = ?3, first_token_ms = NULL,
+                     latency_ms = ?3, first_token_ms = ?4,
                      input_cost_usd = ?5, output_cost_usd = ?6,
                      cache_read_cost_usd = ?7, cache_creation_cost_usd = ?8
-                 WHERE request_id = ?4 AND data_source = 'mcode_session'
+                 WHERE request_id = ?9 AND data_source = 'mcode_session'
                    AND (model IS NOT ?1 OR request_model IS NOT ?1
                         OR total_cost_usd IS NOT ?2 OR latency_ms IS NOT ?3
-                        OR first_token_ms IS NOT NULL
+                        OR first_token_ms IS NOT ?4
                         OR input_cost_usd IS NOT ?5 OR output_cost_usd IS NOT ?6
                         OR cache_read_cost_usd IS NOT ?7 OR cache_creation_cost_usd IS NOT ?8)",
                 params![
                     model,
                     total_cost,
                     latency_ms,
-                    request_id,
+                    first_token_ms,
                     input_cost,
                     output_cost,
                     cache_read_cost,
-                    cache_creation_cost
+                    cache_creation_cost,
+                    request_id
                 ],
             )?
         } else {
@@ -438,7 +468,7 @@ fn sync_from_database(
                     provider_type, is_streaming, cost_multiplier, created_at, data_source,
                     input_token_semantics
                  ) VALUES (?1, '_mcode_session', 'mcode', ?2, ?2, ?3, ?4, ?5, ?6,
-                           ?12, ?13, ?14, ?15, ?7, ?8, NULL, 200, ?9, 'mcode_session', 1, '1',
+                           ?12, ?13, ?14, ?15, ?7, ?8, ?16, 200, ?9, 'mcode_session', 1, '1',
                            ?10, 'mcode_session', ?11)",
                 params![
                     request_id,
@@ -455,7 +485,8 @@ fn sync_from_database(
                     input_cost,
                     output_cost,
                     cache_read_cost,
-                    cache_creation_cost
+                    cache_creation_cost,
+                    first_token_ms
                 ],
             )?
         };
@@ -529,6 +560,34 @@ mod tests {
             "usage": {
                 "input_tokens": tokens.0, "output_tokens": tokens.1,
                 "request_duration_ms": duration,
+            },
+            "thinking_duration_ms": 3200,
+        });
+        source
+            .execute(
+                "INSERT INTO local_runtime_message_rows VALUES (?1,?2,'assistant',?3,?4)",
+                params![id, session, turn, data.to_string()],
+            )
+            .unwrap();
+    }
+
+    /// 同 `add_message`，但带上 `decode_duration_ms`（首字 = 整次调用 − 流式窗口）。
+    fn add_message_with_decode(
+        source: &rusqlite::Connection,
+        id: i64,
+        session: &str,
+        turn: &str,
+        model: Option<&str>,
+        tokens: (u32, u32),
+        request_ms: i64,
+        decode_ms: i64,
+    ) {
+        let data = json!({
+            "context_usage_telemetry": {"model": model},
+            "usage": {
+                "input_tokens": tokens.0, "output_tokens": tokens.1,
+                "request_duration_ms": request_ms,
+                "decode_duration_ms": decode_ms,
             },
             "thinking_duration_ms": 3200,
         });
@@ -738,6 +797,91 @@ mod tests {
             .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn derives_first_token_from_request_duration_minus_decode() {
+        let source = source();
+        add_usage(&source, 1, "s1", "t1", None, (1000, 200));
+        add_message_with_decode(
+            &source,
+            1,
+            "s1",
+            "t1",
+            Some("MiniMax-M3"),
+            (1000, 200),
+            2561,
+            1250,
+        );
+        let db = Database::memory().unwrap();
+        sync_from_database(&db, &source, "backfill").unwrap();
+
+        // 整次调用 2561ms、流式窗口 1250ms → 首字 1311ms
+        assert_eq!(log(&db, "mcode:s1:1").2, 2561);
+        assert_eq!(log(&db, "mcode:s1:1").3, Some(1311));
+    }
+
+    #[test]
+    fn repairs_old_thinking_time_first_token_with_the_two_durations() {
+        let source = source();
+        add_usage(&source, 1, "s1", "t1", None, (1000, 200));
+        add_message_with_decode(
+            &source,
+            1,
+            "s1",
+            "t1",
+            Some("MiniMax-M3"),
+            (1000, 200),
+            2561,
+            1250,
+        );
+        let db = Database::memory().unwrap();
+        sync_from_database(&db, &source, "backfill").unwrap();
+
+        // 旧版本写进去的是 thinking_duration_ms（这里 3200），reconcile 要按 identity 修正
+        db.conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "UPDATE proxy_request_logs SET first_token_ms=3200 WHERE request_id='mcode:s1:1'",
+            )
+            .unwrap();
+        assert_eq!(
+            sync_from_database(&db, &source, "backfill")
+                .unwrap()
+                .imported,
+            1
+        );
+        assert_eq!(log(&db, "mcode:s1:1").3, Some(1311));
+
+        // 再同步一遍不再动（幂等）
+        assert_eq!(
+            sync_from_database(&db, &source, "backfill")
+                .unwrap()
+                .imported,
+            0
+        );
+    }
+
+    #[test]
+    fn keeps_first_token_null_without_a_decode_duration() {
+        let source = source();
+        add_usage(&source, 1, "s1", "t1", None, (1000, 200));
+        add_message(
+            &source,
+            1,
+            "s1",
+            "t1",
+            Some("MiniMax-M3"),
+            (1000, 200),
+            Some(4200),
+        );
+        let db = Database::memory().unwrap();
+        sync_from_database(&db, &source, "backfill").unwrap();
+
+        // 只有 request_duration_ms：推不出首字，宁可空着
+        assert_eq!(log(&db, "mcode:s1:1").2, 4200);
+        assert_eq!(log(&db, "mcode:s1:1").3, None);
     }
 
     #[test]
@@ -1192,7 +1336,7 @@ mod tests {
             .execute_batch(
                 "UPDATE proxy_request_logs SET input_cost_usd='0',output_cost_usd='0',
                 cache_read_cost_usd='0',cache_creation_cost_usd='0';
-             DELETE FROM session_log_sync WHERE file_path='components:request-cost-repair-v1'",
+             DELETE FROM session_log_sync WHERE file_path='components:request-cost-repair-v2'",
             )
             .unwrap();
         assert_eq!(
