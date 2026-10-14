@@ -9,7 +9,8 @@ use crate::error::AppError;
 use crate::proxy::usage::calculator::CostCalculator;
 use crate::proxy::usage::parser::TokenUsage;
 use crate::services::session_usage::{
-    load_sync_cursors, metadata_modified_nanos, update_sync_state, SessionSyncResult, SyncCursor,
+    estimated_first_token_ms, estimated_latency_ms, load_sync_cursors, metadata_modified_nanos,
+    update_sync_state, SessionSyncResult, SyncCursor,
 };
 use crate::services::sql_helpers::INPUT_TOKEN_SEMANTICS_FRESH;
 use crate::services::usage_stats::{find_model_pricing, should_skip_session_insert, DedupKey};
@@ -46,6 +47,10 @@ struct HarnessUsageEvent {
     output_tokens: u32,
     cache_read_tokens: u32,
     cache_creation_tokens: u32,
+    /// 这一步的耗时（`step/start` 到本条时间戳），估不出来时 0。
+    latency_ms: i64,
+    /// 首字耗时（`step/start` 到 `stream[0]`），估不出来时 None。
+    first_token_ms: Option<i64>,
     created_at: i64,
 }
 
@@ -411,6 +416,8 @@ fn parse_harness_usage_events(content: &str) -> Vec<HarnessUsageEvent> {
     let mut session_id: Option<String> = None;
     let mut created_at: Option<i64> = None;
     let mut latest_model = "unknown".to_string();
+    // 最近一条 `step/start` 的时间：一次模型调用的起点，配下面那条 assistant/message 估耗时。
+    let mut step_start_ms: Option<i64> = None;
     let mut events = Vec::new();
 
     for line in content.lines() {
@@ -453,6 +460,9 @@ fn parse_harness_usage_events(content: &str) -> Vec<HarnessUsageEvent> {
                     latest_model = model.to_string();
                 }
             }
+            Some("step/start") => {
+                step_start_ms = value.get("time").and_then(Value::as_i64);
+            }
             Some("assistant/message") => {
                 let Some(data) = value.get("data") else {
                     continue;
@@ -470,6 +480,21 @@ fn parse_harness_usage_events(content: &str) -> Vec<HarnessUsageEvent> {
                     .and_then(Value::as_str)
                     .unwrap_or(&latest_model)
                     .to_string();
+                // 日志里没有请求计时，只能按时间戳估：`step/start` 是这次模型调用的起点，
+                // 本条的时间是整段输出写完的时刻，`stream[0]` 是第一个 chunk 到达的时刻。
+                // 一个 `step/start` 只配一条消息，取出即消费，免得第二条复用同一个起点。
+                let end_ms = value.get("time").and_then(Value::as_i64);
+                let start_ms = step_start_ms.take();
+                let latency_ms = start_ms
+                    .zip(end_ms)
+                    .and_then(|(start, end)| estimated_latency_ms(start, end))
+                    .unwrap_or(0);
+                let first_token_ms = start_ms
+                    .zip(first_stream_time_ms(data))
+                    .filter(|_| latency_ms > 0)
+                    .and_then(|(start, first_output)| {
+                        estimated_first_token_ms(start, first_output, latency_ms)
+                    });
                 events.push(HarnessUsageEvent {
                     seq: value
                         .get("seq")
@@ -481,6 +506,8 @@ fn parse_harness_usage_events(content: &str) -> Vec<HarnessUsageEvent> {
                     output_tokens: value_u32(usage, "outputTokens"),
                     cache_read_tokens: value_u32(usage, "cacheReadTokens"),
                     cache_creation_tokens: value_u32(usage, "cacheWriteTokens"),
+                    latency_ms,
+                    first_token_ms,
                     created_at: value
                         .get("time")
                         .and_then(Value::as_i64)
@@ -494,6 +521,15 @@ fn parse_harness_usage_events(content: &str) -> Vec<HarnessUsageEvent> {
     }
 
     events
+}
+
+/// 本条消息第一个输出 chunk 的到达时刻（毫秒）。没有 `stream` 数组时返回 None。
+fn first_stream_time_ms(data: &Value) -> Option<i64> {
+    data.get("stream")
+        .and_then(Value::as_array)
+        .and_then(|stream| stream.first())
+        .and_then(|chunk| chunk.get("time"))
+        .and_then(Value::as_i64)
 }
 
 fn value_u32(value: &Value, key: &str) -> u32 {
@@ -528,6 +564,7 @@ fn insert_harness_session_entry(
         created_at: event.created_at,
     };
     if should_skip_session_insert(&conn, request_id, &dedup_key)? {
+        refresh_harness_session_entry(&conn, request_id, event)?;
         return Ok(false);
     }
 
@@ -541,26 +578,7 @@ fn insert_harness_session_entry(
         message_id: None,
     };
     let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) =
-        match find_model_pricing(&conn, &event.model) {
-            Some(pricing) => {
-                let cost =
-                    CostCalculator::calculate_for_app(APP_TYPE, &usage, &pricing, Decimal::from(1));
-                (
-                    cost.input_cost.to_string(),
-                    cost.output_cost.to_string(),
-                    cost.cache_read_cost.to_string(),
-                    cost.cache_creation_cost.to_string(),
-                    cost.total_cost.to_string(),
-                )
-            }
-            None => (
-                "0".to_string(),
-                "0".to_string(),
-                "0".to_string(),
-                "0".to_string(),
-                "0".to_string(),
-            ),
-        };
+        harness_session_costs(&conn, event, &usage);
 
     let inserted = conn.execute(
         "INSERT OR IGNORE INTO proxy_request_logs (
@@ -586,8 +604,8 @@ fn insert_harness_session_entry(
             cache_read_cost,
             cache_creation_cost,
             total_cost,
-            0i64,
-            Option::<i64>::None,
+            event.latency_ms,
+            event.first_token_ms,
             200i64,
             Option::<String>::None,
             Some(event.session_id.clone()),
@@ -603,6 +621,91 @@ fn insert_harness_session_entry(
     .map_err(|error| AppError::Database(format!("插入 DeepSeek Harness 会话日志失败: {error}")))?;
 
     Ok(inserted > 0)
+}
+
+/// 这条记录的成本：查不到定价就全 0（与其它会话导入器同一口径）。
+fn harness_session_costs(
+    conn: &rusqlite::Connection,
+    event: &HarnessUsageEvent,
+    usage: &TokenUsage,
+) -> (String, String, String, String, String) {
+    let Some(pricing) = find_model_pricing(conn, &event.model) else {
+        return (
+            "0".to_string(),
+            "0".to_string(),
+            "0".to_string(),
+            "0".to_string(),
+            "0".to_string(),
+        );
+    };
+
+    let cost = CostCalculator::calculate_for_app(APP_TYPE, usage, &pricing, Decimal::from(1));
+    (
+        cost.input_cost.to_string(),
+        cost.output_cost.to_string(),
+        cost.cache_read_cost.to_string(),
+        cost.cache_creation_cost.to_string(),
+        cost.total_cost.to_string(),
+    )
+}
+
+/// 行已经导过之后补计时用的刷新：
+///
+/// 计时（`latency_ms` / `first_token_ms`）是后加的字段，早导的行是 0 / NULL，而
+/// `should_skip_session_insert` 一见 request_id 存在就放行不了插入，光靠重导跑不出数字。
+/// 这里只更新本导入器自己写的那一行（`data_source` 对不上就不动，比如同 id 的代理行），
+/// 且只在计时或成本确实变了时才写。
+fn refresh_harness_session_entry(
+    conn: &rusqlite::Connection,
+    request_id: &str,
+    event: &HarnessUsageEvent,
+) -> Result<bool, AppError> {
+    if event.latency_ms == 0 && event.first_token_ms.is_none() {
+        return Ok(false);
+    }
+
+    let usage = TokenUsage {
+        input_tokens: event.input_tokens,
+        output_tokens: event.output_tokens,
+        cache_read_tokens: event.cache_read_tokens,
+        cache_creation_tokens: event.cache_creation_tokens,
+        cache_creation_1h_tokens: 0,
+        model: Some(event.model.clone()),
+        message_id: None,
+    };
+    let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) =
+        harness_session_costs(conn, event, &usage);
+
+    let changed = conn
+        .execute(
+            "UPDATE proxy_request_logs
+                SET latency_ms = ?2,
+                    first_token_ms = ?3,
+                    input_cost_usd = ?4,
+                    output_cost_usd = ?5,
+                    cache_read_cost_usd = ?6,
+                    cache_creation_cost_usd = ?7,
+                    total_cost_usd = ?8,
+                    pricing_model = ?9
+              WHERE request_id = ?1
+                AND data_source = ?10
+                AND (latency_ms != ?2 OR first_token_ms IS NOT ?3 OR total_cost_usd != ?8)",
+            rusqlite::params![
+                request_id,
+                event.latency_ms,
+                event.first_token_ms,
+                input_cost,
+                output_cost,
+                cache_read_cost,
+                cache_creation_cost,
+                total_cost,
+                event.model,
+                DATA_SOURCE,
+            ],
+        )
+        .map_err(|error| AppError::Database(format!("刷新 DeepSeek Harness 计时失败: {error}")))?;
+
+    Ok(changed > 0)
 }
 
 #[cfg(test)]
@@ -654,6 +757,83 @@ mod tests {
         assert_eq!(events[0].cache_read_tokens, 30);
         assert_eq!(events[0].cache_creation_tokens, 4);
         assert_eq!(events[0].created_at, 1_700_000_002);
+    }
+
+    /// 一步：`step/start` 起点 + 一条带 stream 的 assistant/message。首字固定在起点后 800ms。
+    fn timed_fixture(latency_ms: i64) -> String {
+        let start = 1_700_000_000_100i64;
+        [
+            serde_json::json!({"type":"session","version":0,"id":"sess-2","createdAt":1_700_000_000_000i64,"cwd":"/work","delegationDepth":0}),
+            serde_json::json!({"type":"step/start","seq":0,"time":start,"data":{"turn":1,"step":1}}),
+            serde_json::json!({
+                "type":"assistant/message",
+                "seq":1,
+                "time":start + latency_ms,
+                "data":{
+                    "turn":1,
+                    "step":1,
+                    "stream":[{
+                        "type":"chunk",
+                        "time":start + 800,
+                        "chunk":{"blockType":"reasoning","index":0,"type":"text-start"}
+                    }],
+                    "message":{
+                        "source":{"provider":"deepseek-official","model":"deepseek-v4.1-flash"},
+                        "content":[]
+                    },
+                    "usage":{"inputTokens":100,"outputTokens":300,"cacheReadTokens":30,"cacheWriteTokens":4}
+                }
+            }),
+        ]
+        .iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+    }
+
+    #[test]
+    fn estimates_latency_and_first_token_from_step_timestamps() {
+        let events = parse_harness_usage_events(&timed_fixture(5_000));
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].latency_ms, 5_000);
+        assert_eq!(events[0].first_token_ms, Some(800));
+    }
+
+    #[test]
+    fn drops_timing_outside_the_plausible_window() {
+        // 5ms 的「耗时」低于下限（真实请求不可能这么快），当没有计时；首字随之也不写。
+        let events = parse_harness_usage_events(&timed_fixture(5));
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].latency_ms, 0);
+        assert_eq!(events[0].first_token_ms, None);
+    }
+
+    #[test]
+    fn refreshes_timing_on_an_already_imported_row() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let request_id = "deepseek_harness_session:sess-2:1";
+
+        // 老行：计时还没入库那些（latency 0 / first_token NULL）
+        let untimed = parse_harness_usage_events(&fixture()).remove(0);
+        assert!(insert_harness_session_entry(&db, request_id, &untimed)?);
+
+        // 重导同一行：不新增行，只把计时补上
+        let timed = parse_harness_usage_events(&timed_fixture(5_000)).remove(0);
+        assert!(!insert_harness_session_entry(&db, request_id, &timed)?);
+
+        let conn = lock_conn!(db.conn);
+        let (count, latency_ms, first_token_ms): (i64, i64, Option<i64>) = conn.query_row(
+            "SELECT COUNT(*), MAX(latency_ms), MAX(first_token_ms)
+               FROM proxy_request_logs WHERE request_id = ?1",
+            [request_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(count, 1, "刷新不该插出第二行");
+        assert_eq!(latency_ms, 5_000);
+        assert_eq!(first_token_ms, Some(800));
+        Ok(())
     }
 
     #[test]
