@@ -131,8 +131,9 @@ pub struct ToolVersion {
     wsl_distro: Option<String>,
 }
 
-const VALID_TOOLS: [&str; 10] = [
+const VALID_TOOLS: [&str; 11] = [
     "claude", "codex", "gemini", "grok", "opencode", "openclaw", "hermes", "pi", "mcode", "kimi",
+    "dsh",
 ];
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -572,6 +573,7 @@ fn tool_display_name(tool: &str) -> &'static str {
         "pi" => "Pi",
         "mcode" => "MiniMax Code",
         "kimi" => "Kimi Code",
+        "dsh" => "DeepSeek Harness",
         _ => "Unknown",
     }
 }
@@ -807,6 +809,9 @@ fn npm_install_command_for(tool: &str) -> Option<&'static str> {
         // Kimi Code CLI 官方主推自更新二进制（`kimi upgrade`），npm 包是等价安装方式，
         // 这里作为 installer 不可达时的兜底。
         "kimi" => Some("npm i -g @moonshot-ai/kimi-code@latest"),
+        // DeepSeek Harness 只发 npm 包（无独立 installer），安装与升级都走这里，
+        // 所以 `tool_action_shell_command_for_shell` 的默认分支直接拼这条命令。
+        "dsh" => Some("npm i -g @deepseek-ai/dsh@latest"),
         _ => None,
     }
 }
@@ -1178,6 +1183,7 @@ async fn get_single_tool_version_impl(
         }
         "mcode" => fetch_npm_latest_for_tool(&client, "@minimax-ai/code", tool, local).await,
         "kimi" => fetch_npm_latest_for_tool(&client, "@moonshot-ai/kimi-code", tool, local).await,
+        "dsh" => fetch_npm_latest_for_tool(&client, "@deepseek-ai/dsh", tool, local).await,
         _ => None,
     };
 
@@ -3012,6 +3018,7 @@ fn npm_package_for(tool: &str) -> Option<&'static str> {
         "pi" => Some("@earendil-works/pi-coding-agent"),
         "mcode" => Some("@minimax-ai/code"),
         "kimi" => Some("@moonshot-ai/kimi-code"),
+        "dsh" => Some("@deepseek-ai/dsh"),
         _ => None,
     }
 }
@@ -8676,6 +8683,29 @@ mod tests {
             npm_install_command_for("kimi"),
             Some("npm i -g @moonshot-ai/kimi-code@latest")
         );
+    }
+
+    #[test]
+    fn dsh_is_a_known_tool() {
+        assert!(VALID_TOOLS.contains(&"dsh"));
+        assert_eq!(tool_display_name("dsh"), "DeepSeek Harness");
+        assert_eq!(npm_package_for("dsh"), Some("@deepseek-ai/dsh"));
+        assert_eq!(
+            npm_install_command_for("dsh"),
+            Some("npm i -g @deepseek-ai/dsh@latest")
+        );
+        // dsh 只发 npm 包，升级也必须走这条：官方没有 `dsh update` 子命令。
+        assert_eq!(official_update_args("dsh"), None);
+        assert_eq!(npm_install_extra_args("dsh"), "");
+    }
+
+    /// dsh 装在 npm 全局目录（本机是 `~/.npm-global/bin`），该目录在通用搜索路径里，
+    /// 不需要像 Kimi/OpenCode 那样单独加。这条是「以后不要把通用目录删掉」的守门测试。
+    #[test]
+    fn dsh_is_found_through_the_shared_npm_global_dir() {
+        let home = dirs::home_dir().expect("home dir should resolve");
+        let paths = build_tool_search_paths("dsh");
+        assert!(paths.contains(&home.join(".npm-global").join("bin")));
     }
 
     #[test]

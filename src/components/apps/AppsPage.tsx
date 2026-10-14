@@ -56,6 +56,7 @@ import {
   ENV_BADGE_CONFIG,
   ONE_CLICK_INSTALL_COMMANDS,
   TOOL_APP_IDS,
+  TOOL_GLYPH_ICONS,
   TOOL_NAMES,
   toolDisplayName,
   useToolManagement,
@@ -318,7 +319,11 @@ export function AppsPage() {
                       [row.tool]: !prev[row.tool],
                     }))
                   }
-                  visibility={visibilitySwitch(TOOL_APP_IDS[row.tool])}
+                  visibility={
+                    TOOL_APP_IDS[row.tool]
+                      ? visibilitySwitch(TOOL_APP_IDS[row.tool] as AppId)
+                      : undefined
+                  }
                 />
               ),
             )}
@@ -396,6 +401,7 @@ export function AppsPage() {
 
 function AppRow({
   app,
+  icon,
   name,
   meta,
   version,
@@ -403,18 +409,19 @@ function AppRow({
   visibility,
   footer,
 }: {
-  app: AppId;
+  app?: AppId;
+  icon?: string;
   name: React.ReactNode;
   meta?: React.ReactNode;
   version?: React.ReactNode;
   action?: React.ReactNode;
-  visibility: React.ReactNode;
+  visibility?: React.ReactNode;
   footer?: React.ReactNode;
 }) {
   return (
     <div data-tool-row className="px-4 py-3">
       <div className="flex items-center gap-4">
-        <AppGlyph app={app} size={20} badgeClassName="bg-surface" />
+        <AppGlyph app={app} icon={icon} size={20} badgeClassName="bg-surface" />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1.5 text-strong text-fg-1">
             {name}
@@ -457,7 +464,7 @@ function ToolRow({
   onUninstall: () => void;
   expanded: boolean;
   onToggleExpanded: () => void;
-  visibility: React.ReactNode;
+  visibility?: React.ReactNode;
 }) {
   const { t } = useTranslation();
   const info = tools.toolVersionByName.get(tool);
@@ -649,6 +656,7 @@ function ToolRow({
   return (
     <AppRow
       app={TOOL_APP_IDS[tool]}
+      icon={TOOL_GLYPH_ICONS[tool]}
       name={
         <>
           <span className="truncate">{toolDisplayName(tool)}</span>

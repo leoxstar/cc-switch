@@ -46,6 +46,7 @@ export const TOOL_NAMES = [
   "pi",
   "mcode",
   "kimi",
+  "dsh",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 export type ToolLifecycleAction = "install" | "update" | "uninstall";
@@ -150,7 +151,9 @@ npm i -g @earendil-works/pi-coding-agent@latest
 # MiniMax Code
 ${posixScriptInstallCommand("https://filecdn.minimax.chat/public/install.sh")} || ${MCODE_NPM_INSTALL_COMMAND}
 # Kimi Code
-${posixScriptInstallCommand("https://code.kimi.com/kimi-code/install.sh")} || npm i -g @moonshot-ai/kimi-code@latest`;
+${posixScriptInstallCommand("https://code.kimi.com/kimi-code/install.sh")} || npm i -g @moonshot-ai/kimi-code@latest
+# DeepSeek Harness
+npm i -g @deepseek-ai/dsh@latest`;
 
 const WINDOWS_ONE_CLICK_INSTALL_COMMANDS = `# Claude Code
 ${CLAUDE_NPM_INSTALL_COMMAND}
@@ -171,7 +174,9 @@ npm i -g @earendil-works/pi-coding-agent@latest
 # MiniMax Code
 ${MCODE_WINDOWS_INSTALL_COMMAND}
 # Kimi Code
-${KIMI_WINDOWS_INSTALL_COMMAND}`;
+${KIMI_WINDOWS_INSTALL_COMMAND}
+# DeepSeek Harness
+npm i -g @deepseek-ai/dsh@latest`;
 
 export const ONE_CLICK_INSTALL_COMMANDS = isWindows()
   ? WINDOWS_ONE_CLICK_INSTALL_COMMANDS
@@ -188,6 +193,7 @@ export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
   pi: "Pi",
   mcode: "MiniMax Code",
   kimi: "Kimi Code",
+  dsh: "DeepSeek Harness",
 };
 
 // 后端返回的 tool 是 string；这里收敛唯一的 ToolName 断言与兜底，供升级确认
@@ -196,7 +202,9 @@ export function toolDisplayName(tool: string): string {
   return TOOL_DISPLAY_NAMES[tool as ToolName] ?? tool;
 }
 
-export const TOOL_APP_IDS: Record<ToolName, AppId> = {
+// dsh 还没有 AppType（侧栏没有它自己的 tab、配置页也不存在），所以这张表是 Partial：
+// 查不到就不给可见性开关，也不拿名字去索引 AppGlyph。
+export const TOOL_APP_IDS: Partial<Record<ToolName, AppId>> = {
   claude: "claude",
   codex: "codex",
   gemini: "gemini",
@@ -207,6 +215,11 @@ export const TOOL_APP_IDS: Record<ToolName, AppId> = {
   pi: "pi",
   mcode: "mcode",
   kimi: "kimi",
+};
+
+/** 没有 AppType 的工具走 ProviderIcon 的图标名（`src/icons/extracted` 里已有的那个）。 */
+export const TOOL_GLYPH_ICONS: Partial<Record<ToolName, string>> = {
+  dsh: "deepseek",
 };
 
 // 工具版本探测代价高：每个工具一次 `--version` 子进程 + 一次 npm/github/pypi 网络请求。

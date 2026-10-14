@@ -39,7 +39,10 @@ const APP_BADGE_ICON: Partial<Record<AppId, typeof Terminal>> = {
 };
 
 interface AppGlyphProps {
-  app: AppId;
+  /** 有 AppType 的应用。没有 AppType 的工具（如 dsh）改传 `icon`。 */
+  app?: AppId;
+  /** 没有 AppType 时用的 ProviderIcon 图标名（`src/icons/extracted` 里的名字）。 */
+  icon?: string;
   /** 图标边长：侧栏 16，页头 20 */
   size?: number;
   /** 角标底色要和所在的行一致，否则看起来像缺了一块 */
@@ -50,11 +53,12 @@ interface AppGlyphProps {
 /** 应用图标 + 角标（装饰性，名称由旁边的文字或按钮的 aria-label 提供）。 */
 export function AppGlyph({
   app,
+  icon,
   size = 16,
   badgeClassName,
   className,
 }: AppGlyphProps) {
-  const BadgeIcon = APP_BADGE_ICON[app];
+  const BadgeIcon = app ? APP_BADGE_ICON[app] : undefined;
   return (
     <span
       aria-hidden="true"
@@ -65,7 +69,7 @@ export function AppGlyph({
       style={{ width: size + 2, height: size + 2 }}
     >
       <ProviderIcon
-        icon={APP_ICON_NAME[app]}
+        icon={app ? APP_ICON_NAME[app] : icon}
         name=""
         size={size}
         showFallback={false}

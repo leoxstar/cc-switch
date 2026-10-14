@@ -287,6 +287,39 @@ describe("AppsPage concurrent CLI upgrades", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows DeepSeek Harness (dsh) without a sidebar switch, and Kimi Code with one", async () => {
+    await renderApps();
+
+    // dsh 还没有 AppType，所以没有侧栏可见性开关；
+    // 同一行里图标照旧渲染（deepseek.svg）。
+    const dshRow = card("DeepSeek Harness");
+    expect(
+      dshRow.queryByRole("switch", { name: /appsPage\.showInSidebar/ }),
+    ).not.toBeInTheDocument();
+
+    // 正对照：同一个查询在有 AppType 的行上能找到开关。
+    expect(
+      card("Kimi Code").getByRole("switch", {
+        name: /appsPage\.showInSidebar/,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("includes the DeepSeek Harness install command in the manual commands", async () => {
+    const user = userEvent.setup();
+    await renderApps();
+    await user.click(
+      screen.getByRole("button", { name: "appsPage.moreActions" }),
+    );
+    await user.click(
+      await screen.findByRole("menuitem", { name: "appsPage.manualCommands" }),
+    );
+
+    expect(screen.getByRole("dialog").textContent).toContain(
+      "npm i -g @deepseek-ai/dsh@latest",
+    );
+  });
+
   it.each([["Windows NT 10.0"], ["X11; Linux x86_64"]])(
     "shows the official Hermes uninstall command for %s",
     async (userAgent) => {
