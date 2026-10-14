@@ -1765,6 +1765,8 @@
     "customUserAgentHint": "ローカルルーティング/プロキシ引き継ぎが有効な場合にのみ適用され、プロバイダー API へ転送するリクエストの User-Agent を置き換えます。",
     "customUserAgentInvalid": "User-Agent に制御文字（改行など）を含めることはできません。含まれている場合は無視されます。",
     "customUserAgentPresets": "プリセット",
+    "stripClaudeCodeFingerprint": "Claude Code フィンガープリントの除去",
+    "stripClaudeCodeFingerprintHint": "既定では無効です。OpenAI Chat、Responses、Gemini への変換時にクライアント識別ヘッダーと anthropic-* ヘッダーを除去し、ツール名を別名に変換して応答時に復元します。パラメータは保持されます。Chat のシステムメッセージは先頭に移動します。Anthropic の直接転送には影響しません。",
     "localProxyRequestOverrides": "ローカルプロキシのリクエスト上書き",
     "localProxyRequestOverridesHint": "ローカルルーティング/プロキシ引き継ぎ後にのみ有効で、変換後の上流リクエストへ適用されます。",
     "localProxyRequestOverridesInvalid": "ローカルプロキシのリクエスト上書き形式エラー: {{error}}",

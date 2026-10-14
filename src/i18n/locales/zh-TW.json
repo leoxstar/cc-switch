@@ -1766,6 +1766,8 @@
     "customUserAgentHint": "僅在開啟本地路由/代理接管後生效，會取代轉發至供應商 API 請求中的 User-Agent。",
     "customUserAgentInvalid": "User-Agent 不能包含控制字元（如換行字元），否則將被忽略。",
     "customUserAgentPresets": "預設",
+    "stripClaudeCodeFingerprint": "剝離 Claude Code 指紋",
+    "stripClaudeCodeFingerprintHint": "預設關閉。僅在 OpenAI Chat、Responses、Gemini 格式轉換時生效：過濾客戶端指紋標頭與 anthropic-* 標頭，為工具名稱加入別名並在回應中還原，保留工具參數。Chat 請求也會將系統訊息整理到開頭。原生 Anthropic 透傳不受影響。",
     "localProxyRequestOverrides": "本地代理請求覆蓋",
     "localProxyRequestOverridesHint": "僅在本地路由/代理接管後生效，套用於協定轉換後的上游請求。",
     "localProxyRequestOverridesInvalid": "本地代理請求覆蓋格式錯誤：{{error}}",
