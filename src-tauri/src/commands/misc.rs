@@ -131,8 +131,8 @@ pub struct ToolVersion {
     wsl_distro: Option<String>,
 }
 
-const VALID_TOOLS: [&str; 9] = [
-    "claude", "codex", "gemini", "grok", "opencode", "openclaw", "hermes", "pi", "mcode",
+const VALID_TOOLS: [&str; 10] = [
+    "claude", "codex", "gemini", "grok", "opencode", "openclaw", "hermes", "pi", "mcode", "kimi",
 ];
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -571,6 +571,7 @@ fn tool_display_name(tool: &str) -> &'static str {
         "hermes" => "Hermes",
         "pi" => "Pi",
         "mcode" => "MiniMax Code",
+        "kimi" => "Kimi Code",
         _ => "Unknown",
     }
 }
@@ -590,6 +591,10 @@ const GROK_INSTALL_UNIX: &str =
 /// 可改），系统 Node 不达标时自带隔离 Node；重跑即升级（已是最新则跳过），全程无交互提示。
 const MCODE_INSTALL_UNIX: &str =
     "bash -c 'tmp=$(mktemp) && curl -fsSL https://filecdn.minimax.chat/public/install.sh -o $tmp && bash $tmp; status=$?; rm -f $tmp; exit $status'";
+/// Kimi Code CLI 官方 installer：下载自更新二进制到 `$KIMI_CODE_HOME/bin`（默认
+/// `~/.kimi-code/bin`）并校验 checksum。上游无 npm 依赖，npm 包只作兜底。
+const KIMI_INSTALL_UNIX: &str =
+    "bash -c 'tmp=$(mktemp) && curl -fsSL https://code.kimi.com/kimi-code/install.sh -o $tmp && bash $tmp; status=$?; rm -f $tmp; exit $status'";
 /// Codex 官方独立安装器（POSIX sh 脚本）。独立安装版的 `codex update` 内部跑的正是
 /// `curl ... | sh` 且没开 pipefail——实测断网时 curl 失败、sh 读到空脚本 exit 0，
 /// `codex update` 仍打印 "Update ran successfully" 并 exit 0。所以不走 `codex update`，
@@ -643,6 +648,17 @@ fn grok_install_windows_command() -> String {
     format!(
         "powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {}",
         powershell_encoded_command(GROK_INSTALL_WINDOWS_SCRIPT)
+    )
+}
+
+#[cfg(target_os = "windows")]
+const KIMI_INSTALL_WINDOWS_SCRIPT: &str = "irm https://code.kimi.com/kimi-code/install.ps1 | iex";
+
+#[cfg(target_os = "windows")]
+fn kimi_install_windows_command() -> String {
+    format!(
+        "powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {}",
+        powershell_encoded_command(KIMI_INSTALL_WINDOWS_SCRIPT)
     )
 }
 
@@ -788,6 +804,9 @@ fn npm_install_command_for(tool: &str) -> Option<&'static str> {
         "mcode" => Some(
             "npm i -g @minimax-ai/code@latest --ignore-scripts=false --include=optional \"--allow-scripts=@minimax-ai/code,better-sqlite3\"",
         ),
+        // Kimi Code CLI 官方主推自更新二进制（`kimi upgrade`），npm 包是等价安装方式，
+        // 这里作为 installer 不可达时的兜底。
+        "kimi" => Some("npm i -g @moonshot-ai/kimi-code@latest"),
         _ => None,
     }
 }
@@ -860,6 +879,7 @@ fn tool_action_shell_command_for_shell(
         let installer = match tool {
             "grok" => Some(grok_install_windows_command()),
             "mcode" => Some(mcode_install_windows_command()),
+            "kimi" => Some(kimi_install_windows_command()),
             _ => None,
         };
         if let Some(installer) = installer {
@@ -1157,6 +1177,7 @@ async fn get_single_tool_version_impl(
             fetch_npm_latest_for_tool(&client, "@earendil-works/pi-coding-agent", tool, local).await
         }
         "mcode" => fetch_npm_latest_for_tool(&client, "@minimax-ai/code", tool, local).await,
+        "kimi" => fetch_npm_latest_for_tool(&client, "@moonshot-ai/kimi-code", tool, local).await,
         _ => None,
     };
 
@@ -2006,6 +2027,23 @@ fn mcode_extra_search_paths(
     paths
 }
 
+/// Kimi Code CLI 官方 installer 把 `kimi` 放到 `$KIMI_CODE_HOME/bin`（默认 `~/.kimi-code/bin`）。
+/// installer 只改 shell rc / 用户 PATH，GUI 进程继承的旧 PATH 看不到，所以同 Grok/MiniMax
+/// 一样显式排在通用 npm/Node 目录前面。
+fn kimi_extra_search_paths(
+    home: &Path,
+    kimi_code_home: Option<std::ffi::OsString>,
+) -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(root) = kimi_code_home.filter(|value| !value.is_empty()) {
+        push_unique_path(&mut paths, std::path::PathBuf::from(root).join("bin"));
+    }
+    if !home.as_os_str().is_empty() {
+        push_unique_path(&mut paths, home.join(".kimi-code").join("bin"));
+    }
+    paths
+}
+
 fn tool_executable_candidates(tool: &str, dir: &Path) -> Vec<std::path::PathBuf> {
     #[cfg(target_os = "windows")]
     {
@@ -2192,6 +2230,12 @@ fn build_tool_search_paths(tool: &str) -> Vec<std::path::PathBuf> {
     }
     if tool == "mcode" {
         let extra_paths = mcode_extra_search_paths(&home, std::env::var_os("MCODE_INSTALL_DIR"));
+        for path in extra_paths {
+            push_unique_path(&mut search_paths, path);
+        }
+    }
+    if tool == "kimi" {
+        let extra_paths = kimi_extra_search_paths(&home, std::env::var_os("KIMI_CODE_HOME"));
         for path in extra_paths {
             push_unique_path(&mut search_paths, path);
         }
@@ -2967,6 +3011,7 @@ fn npm_package_for(tool: &str) -> Option<&'static str> {
         "openclaw" => Some("openclaw"),
         "pi" => Some("@earendil-works/pi-coding-agent"),
         "mcode" => Some("@minimax-ai/code"),
+        "kimi" => Some("@moonshot-ai/kimi-code"),
         _ => None,
     }
 }
@@ -4284,6 +4329,7 @@ fn posix_install_command_for(tool: &str) -> String {
         "grok" => installer_with_npm_fallback(GROK_INSTALL_UNIX, tool),
         "opencode" => installer_with_npm_fallback(OPENCODE_INSTALL_UNIX, tool),
         "mcode" => installer_with_npm_fallback(MCODE_INSTALL_UNIX, tool),
+        "kimi" => installer_with_npm_fallback(KIMI_INSTALL_UNIX, tool),
         "hermes" => HERMES_INSTALL_UNIX.to_string(),
         _ => static_fallback_command_for(tool, ToolLifecycleAction::Install),
     }
@@ -8619,6 +8665,30 @@ mod tests {
             assert!(!is_valid_wsl_distro_name("distro with spaces"));
             assert!(!is_valid_wsl_distro_name(&"a".repeat(65)));
         }
+    }
+
+    #[test]
+    fn kimi_is_a_known_tool() {
+        assert!(VALID_TOOLS.contains(&"kimi"));
+        assert_eq!(tool_display_name("kimi"), "Kimi Code");
+        assert_eq!(npm_package_for("kimi"), Some("@moonshot-ai/kimi-code"));
+        assert_eq!(
+            npm_install_command_for("kimi"),
+            Some("npm i -g @moonshot-ai/kimi-code@latest")
+        );
+    }
+
+    #[test]
+    fn kimi_extra_search_paths_cover_official_installer_dir() {
+        let home = PathBuf::from("/home/tester");
+
+        let paths = kimi_extra_search_paths(&home, None);
+        assert_eq!(paths, vec![home.join(".kimi-code").join("bin")]);
+
+        let root = Some(std::ffi::OsString::from("/opt/kimi-home"));
+        let paths = kimi_extra_search_paths(&home, root);
+        assert!(paths.contains(&PathBuf::from("/opt/kimi-home").join("bin")));
+        assert!(paths.contains(&home.join(".kimi-code").join("bin")));
     }
 
     #[test]

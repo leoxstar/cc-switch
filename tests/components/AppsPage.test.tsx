@@ -17,6 +17,7 @@ import {
   vi,
 } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TOOL_NAMES } from "@/components/apps/useToolManagement";
 import type {
   settingsApi,
   ToolInstallationReport,
@@ -176,19 +177,23 @@ describe("AppsPage concurrent CLI upgrades", () => {
     mocks.getToolVersions
       .mockReset()
       .mockImplementation(async (tools: string[]) =>
-        tools.map((name) => ({
-          name,
-          version: missing.has(name)
-            ? null
-            : upgraded.has(name) || !outdated.has(name)
-              ? "2.0.0"
-              : "1.0.0",
-          latest_version: "2.0.0",
-          error: null,
-          installed_but_broken: false,
-          env_type: "windows",
-          wsl_distro: null,
-        })),
+        tools.map((name) => {
+          let version: string | null = "1.0.0";
+          if (missing.has(name)) {
+            version = null;
+          } else if (upgraded.has(name) || !outdated.has(name)) {
+            version = "2.0.0";
+          }
+          return {
+            name,
+            version,
+            latest_version: "2.0.0",
+            error: null,
+            installed_but_broken: false,
+            env_type: "windows",
+            wsl_distro: null,
+          };
+        }),
       );
     mocks.probeToolInstallations
       .mockReset()
@@ -1050,7 +1055,10 @@ describe("AppsPage concurrent CLI upgrades", () => {
     });
     const { AppsPage } = await import("@/components/apps/AppsPage");
     const view = mountApps(AppsPage);
-    await waitFor(() => expect(mocks.getToolVersions).toHaveBeenCalledTimes(9));
+    // 每个工具一次探测：用工具数而不是写死数字，新增工具时这条用例不再假失败。
+    await waitFor(() =>
+      expect(mocks.getToolVersions).toHaveBeenCalledTimes(TOOL_NAMES.length),
+    );
     view.unmount();
     const remounted = await renderApps();
     fireEvent.click(updateButton("Claude Code"));
@@ -1296,14 +1304,14 @@ describe("AppsPage concurrent CLI upgrades", () => {
     let claudeAttempts = 0;
     mocks.runToolLifecycleAction.mockImplementation(
       async ([tool]: string[]) => {
-        const run =
-          tool === "claude"
-            ? ++claudeAttempts === 1
-              ? firstRun
-              : retryRun
-            : tool === "codex"
-              ? codexRun
-              : geminiRun;
+        let run = geminiRun;
+        if (tool === "codex") {
+          run = codexRun;
+        }
+        if (tool === "claude") {
+          claudeAttempts += 1;
+          run = claudeAttempts === 1 ? firstRun : retryRun;
+        }
         await run.promise;
         upgraded.add(tool);
       },
