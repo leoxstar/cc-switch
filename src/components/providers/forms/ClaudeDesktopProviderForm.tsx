@@ -1254,12 +1254,18 @@ export function ClaudeDesktopProviderForm({
                       id="claude-desktop-custom-user-agent"
                       value={customUserAgent}
                       onChange={setCustomUserAgent}
+                      help={t("providerForm.customUserAgentHelp", {
+                        defaultValue: "替换转发到供应商的请求里的 User-Agent。",
+                      })}
                     />
                     <LocalProxyRequestOverridesField
                       headersJson={localProxyHeadersOverride}
                       bodyJson={localProxyBodyOverride}
                       onHeadersJsonChange={setLocalProxyHeadersOverride}
                       onBodyJsonChange={setLocalProxyBodyOverride}
+                      help={t("providerForm.localProxyRequestOverridesHelp", {
+                        defaultValue: "作用于格式转换后发给上游的请求。",
+                      })}
                     />
                   </div>
                 </div>

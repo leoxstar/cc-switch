@@ -722,7 +722,6 @@ pub(crate) fn plan(
         nested,
         exclusive,
         outgoing: outgoing_exclusive(owner),
-        route,
         legacy_official_proxy_base_url: match target {
             Target::Proxy { base_url, .. } => (*base_url).to_string(),
             Target::Direct(_) => configured_proxy_base_url(db),

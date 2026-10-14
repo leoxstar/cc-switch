@@ -1388,7 +1388,10 @@ mod tests {
             for route in [
                 RouteWrite::Official { dormant_base_url: PROXY.into() },
                 RouteWrite::OfficialMirror, official_proxy(false), official_proxy(true),
-                RouteWrite::Custom(proxy_route_table(ROUTE_ID, PROXY, false)),
+                RouteWrite::Custom {
+                    table: proxy_route_table(ROUTE_ID, PROXY, false),
+                    id: None,
+                },
                 RouteWrite::Default,
             ] {
                 let expected_selector = route.selector().map(str::to_string);
@@ -1419,6 +1422,7 @@ mod tests {
             assert!(doc.to_string().contains(legacy));
             let active = format!("profile = 'sleeping'\n{live}");
             let patch = CodexConfigPatch {
+                dormant_base_url: PROXY.into(),
                 top: vec![],
                 nested: vec![],
                 exclusive: vec![],
@@ -1438,6 +1442,7 @@ mod tests {
     #[test]
     fn missing_legacy_is_never_created_and_malformed_legacy_is_refused() {
         let patch = CodexConfigPatch {
+            dormant_base_url: PROXY.into(),
             top: vec![],
             nested: vec![],
             exclusive: vec![],

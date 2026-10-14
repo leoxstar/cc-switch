@@ -535,22 +535,22 @@ describe("ClaudeDesktopProviderForm", () => {
     const onSubmit = vi.fn();
     renderForm(proxyFixture, onSubmit);
 
-    fireEvent.change(
-      headerOverridesTextarea(),
-      { target: { value: '{"X-Gateway-Token":"secret"}' } },
-    );
+    fireEvent.change(headerOverridesTextarea(), {
+      target: { value: '{"X-Gateway-Token":"secret"}' },
+    });
     fireEvent.change(bodyOverridesTextarea(), {
       target: { value: '{"temperature":0.2}' },
     });
-    fireEvent.change(screen.getByLabelText("自定义 User-Agent"), {
-      target: { value: "  cc-switch/1.0  " },
-    });
+    fireEvent.change(
+      screen.getByLabelText("自定义 User-Agent", { selector: "input" }),
+      {
+        target: { value: "  cc-switch/1.0  " },
+      },
+    );
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    expect(
-      onSubmit.mock.calls[0][0].meta.localProxyRequestOverrides,
-    ).toEqual({
+    expect(onSubmit.mock.calls[0][0].meta.localProxyRequestOverrides).toEqual({
       headers: { "x-gateway-token": "secret" },
       body: { temperature: 0.2 },
     });
@@ -640,9 +640,9 @@ describe("ClaudeDesktopProviderForm", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    expect(
-      onSubmit.mock.calls[0][0].meta.localProxyRequestOverrides,
-    ).toEqual({ headers: { "x-gateway-token": "secret" } });
+    expect(onSubmit.mock.calls[0][0].meta.localProxyRequestOverrides).toEqual({
+      headers: { "x-gateway-token": "secret" },
+    });
     expect(onSubmit.mock.calls[0][0].meta.customUserAgent).toBe(
       "cc-switch/1.0",
     );
