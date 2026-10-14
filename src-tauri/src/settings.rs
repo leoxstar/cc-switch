@@ -46,7 +46,7 @@ pub struct VisibleApps {
     pub openclaw: bool,
     #[serde(default)]
     pub hermes: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub dsh: bool,
     #[serde(default = "default_true")]
     pub pi: bool,
@@ -67,7 +67,7 @@ impl Default for VisibleApps {
             opencode: true,
             openclaw: true,
             hermes: false, // 默认不显示，需用户手动启用
-            dsh: false,    // 默认不显示，需用户手动启用
+            dsh: true,
             pi: true,
             mcode: true,
             kimi: true,    // 默认显示

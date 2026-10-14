@@ -40,7 +40,7 @@ export const DEFAULT_VISIBLE_APPS: VisibleApps = {
   opencode: true,
   openclaw: true,
   hermes: true,
-  dsh: false,
+  dsh: true,
   pi: true,
   mcode: true,
   kimi: true,

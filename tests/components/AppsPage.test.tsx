@@ -287,22 +287,24 @@ describe("AppsPage concurrent CLI upgrades", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows DeepSeek Harness (dsh) without a sidebar switch, and Kimi Code with one", async () => {
+  it("gives DeepSeek Harness (dsh) the same sidebar switch as the other apps", async () => {
     await renderApps();
 
-    // dsh 还没有 AppType，所以没有侧栏可见性开关；
-    // 同一行里图标照旧渲染（deepseek.svg）。
-    const dshRow = card("DeepSeek Harness");
-    expect(
-      dshRow.queryByRole("switch", { name: /appsPage\.showInSidebar/ }),
-    ).not.toBeInTheDocument();
+    // dsh 接上 AppType 后可见性开关与图标都走 AppGlyph；以前这里断言「没有开关」，
+    // 那是 AppType 还没回移时的旧状态。
+    const dshSwitch = card("DeepSeek Harness").getByRole("switch", {
+      name: /appsPage\.showInSidebar/,
+    });
+    expect(dshSwitch).toBeInTheDocument();
+    // DSH 现在默认显示（前后端默认值都是 true），开关先落在打开态。
+    expect(dshSwitch).toBeChecked();
 
-    // 正对照：同一个查询在有 AppType 的行上能找到开关。
-    expect(
+    // 开关按行分离，不是每行都拿到同一个元素。
+    expect(dshSwitch).not.toBe(
       card("Kimi Code").getByRole("switch", {
         name: /appsPage\.showInSidebar/,
       }),
-    ).toBeInTheDocument();
+    );
   });
 
   it("includes the DeepSeek Harness install command in the manual commands", async () => {

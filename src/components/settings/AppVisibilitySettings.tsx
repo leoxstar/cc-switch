@@ -31,6 +31,8 @@ const APP_CONFIG: Array<{
   { id: "openclaw", icon: "openclaw", nameKey: "apps.openclaw" },
   { id: "hermes", icon: "hermes", nameKey: "apps.hermes" },
   { id: "dsh", icon: "deepseek", nameKey: "apps.dsh" },
+  { id: "pi", icon: "pi", nameKey: "apps.pi" },
+  { id: "mcode", icon: "minimax", nameKey: "apps.mcode" },
   { id: "kimi", icon: "kimi", nameKey: "apps.kimi" },
 ];
 
@@ -49,7 +51,7 @@ export function AppVisibilitySettings({
     opencode: true,
     openclaw: true,
     hermes: true,
-    dsh: false,
+    dsh: true,
     pi: true,
     mcode: true,
     kimi: true,

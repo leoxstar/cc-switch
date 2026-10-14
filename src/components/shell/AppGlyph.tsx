@@ -41,7 +41,7 @@ const APP_BADGE_ICON: Partial<Record<AppId, typeof Terminal>> = {
 };
 
 interface AppGlyphProps {
-  /** 有 AppType 的应用。没有 AppType 的工具（如 dsh）改传 `icon`。 */
+  /** 有 AppType 的应用走这里。工具名（如 AppsPage 的 ToolName）先经 TOOL_APP_IDS 映射成 AppId。 */
   app?: AppId;
   /** 没有 AppType 时用的 ProviderIcon 图标名（`src/icons/extracted` 里的名字）。 */
   icon?: string;

@@ -202,8 +202,9 @@ export function toolDisplayName(tool: string): string {
   return TOOL_DISPLAY_NAMES[tool as ToolName] ?? tool;
 }
 
-// dsh 还没有 AppType（侧栏没有它自己的 tab、配置页也不存在），所以这张表是 Partial：
-// 查不到就不给可见性开关，也不拿名字去索引 AppGlyph。
+// 工具名 → AppType：查得到的行才有侧栏可见性开关，图标也走 AppGlyph（APP_ICON_NAME）。
+// 保持 Partial 是给「应用页有、侧栏还没有」的工具留口子，查不到就不给开关；
+// dsh 曾是这种状态，PR #7244 回移接上 AppType 后不再缺项。
 export const TOOL_APP_IDS: Partial<Record<ToolName, AppId>> = {
   claude: "claude",
   codex: "codex",
@@ -215,9 +216,11 @@ export const TOOL_APP_IDS: Partial<Record<ToolName, AppId>> = {
   pi: "pi",
   mcode: "mcode",
   kimi: "kimi",
+  dsh: "dsh",
 };
 
-/** 没有 AppType 的工具走 ProviderIcon 的图标名（`src/icons/extracted` 里已有的那个）。 */
+/** 没有 AppType 的工具走 ProviderIcon 的图标名（`src/icons/extracted` 里已有的那个）。
+ *  当前没有这样的工具，表里暂时没有命中者。 */
 export const TOOL_GLYPH_ICONS: Partial<Record<ToolName, string>> = {
   dsh: "deepseek",
 };
