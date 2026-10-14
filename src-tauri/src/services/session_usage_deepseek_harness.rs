@@ -158,12 +158,22 @@ fn collect_session_files(root: &Path, files: &mut Vec<PathBuf>, depth: usize) {
             collect_session_files(&path, files, depth + 1);
             continue;
         }
-        if path.file_name().and_then(|name| name.to_str()) == Some("session.jsonl")
-            || path.file_name().and_then(|name| name.to_str()) == Some("session.jsonl.zstd")
-        {
+        if is_dsh_session_log_file(&path) {
             files.push(path);
         }
     }
+}
+
+/// DSH 的会话日志名随版本变：`session.jsonl`（未压缩）、`session.jsonl.zstd`（旧版压缩名），以及带版本号的 `session.v3.jsonl.zstd` / `session.v4.jsonl.zstd`。
+///
+/// 同一个会话目录里可能同时留着多份快照（实测 v4 比 v3 只多一行，`seq` 单调增、前面的行
+/// 完全一致），所以不能只挑最新那份——旧快照可能更长，也可能反过来。这里全收，重复交给
+/// `request_id = <session_id>:<seq>` 去重：同一个 `seq` 第二次插入返回 false，不会重复计费。
+fn is_dsh_session_log_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    name.starts_with("session.") && (name.ends_with(".jsonl") || name.ends_with(".jsonl.zstd"))
 }
 
 fn sync_single_harness_file(
@@ -759,6 +769,77 @@ mod tests {
         let mut torn = zstd_frame(&fixture())?;
         torn.truncate(torn.len() / 2);
         assert!(decode_zstd_session_log(&torn)?.is_empty());
+        Ok(())
+    }
+
+    /// 目录名与文件名照抄本机实测：`~/.dsh/sessions/<编码 cwd>/<session-id>/session.v4.jsonl.zstd`。
+    #[test]
+    fn discovers_versioned_session_log_files() -> Result<(), AppError> {
+        let tmp = tempfile::tempdir().map_err(|error| AppError::Config(error.to_string()))?;
+        let root = tmp.path().join("--Users-cheese--").join("session-abc");
+        std::fs::create_dir_all(&root).map_err(|error| AppError::Config(error.to_string()))?;
+        for name in [
+            "session.jsonl.zstd",
+            "session.v3.jsonl.zstd",
+            "session.v4.jsonl.zstd",
+            "session.lock",
+            "session.v4.jsonl.zstd.tmp",
+        ] {
+            std::fs::write(root.join(name), b"x")
+                .map_err(|error| AppError::Config(error.to_string()))?;
+        }
+
+        let mut files = Vec::new();
+        collect_session_files(tmp.path(), &mut files, 0);
+        let mut names: Vec<String> = files
+            .iter()
+            .filter_map(|path| path.file_name()?.to_str().map(str::to_owned))
+            .collect();
+        names.sort();
+
+        assert_eq!(
+            names,
+            vec![
+                "session.jsonl.zstd".to_string(),
+                "session.v3.jsonl.zstd".to_string(),
+                "session.v4.jsonl.zstd".to_string(),
+            ]
+        );
+        Ok(())
+    }
+
+    /// 同一会话的多份版本快照（v3 与 v4 的行前缀相同、`seq` 相同）只能计一次。
+    #[test]
+    fn versioned_snapshots_of_one_session_are_deduped_by_seq() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let cursors = load_sync_cursors(&db)?;
+        let (header, events_text) = fixture_parts();
+
+        let tmp = tempfile::tempdir().map_err(|error| AppError::Config(error.to_string()))?;
+        let root = tmp.path().join("session-sess-1");
+        std::fs::create_dir_all(&root).map_err(|error| AppError::Config(error.to_string()))?;
+
+        let mut versioned_paths = Vec::new();
+        for name in ["session.v3.jsonl.zstd", "session.v4.jsonl.zstd"] {
+            let mut encoded = zstd_frame(&header)?;
+            encoded.extend_from_slice(&zstd_frame(&events_text)?);
+            let path = root.join(name);
+            std::fs::write(&path, encoded).map_err(|error| AppError::Config(error.to_string()))?;
+            versioned_paths.push(path);
+        }
+
+        let first = sync_single_harness_file(&db, &versioned_paths[0], &cursors)?;
+        assert_eq!((first.imported, first.skipped), (1, 0));
+        let second = sync_single_harness_file(&db, &versioned_paths[1], &cursors)?;
+        assert_eq!((second.imported, second.skipped), (0, 1));
+
+        let conn = lock_conn!(db.conn);
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM proxy_request_logs WHERE data_source = 'deepseek_harness_session'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(count, 1);
         Ok(())
     }
 }
