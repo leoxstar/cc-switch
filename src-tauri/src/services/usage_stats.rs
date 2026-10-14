@@ -2751,7 +2751,57 @@ fn model_pricing_candidates(model_id: &str) -> Vec<String> {
         }
     }
 
+    // 命名空间写在冒号前的 id（`cn:deepseek-v4.1-flash`）走完上面那套只剩 `cn`，兜底候选
+    // 补在最后，所以只填空缺、不改已能命中的优先级。
+    for candidate in namespace_prefixed_candidates(model_id) {
+        push_unique_candidate(&mut candidates, candidate);
+    }
+
     candidates
+}
+
+/// 冒号前的「命名空间」最长认这么多字符：区域/网关标签（`cn`、`global`、`us`）都很短，
+/// 而模型名几乎都带连字符或点，用长度加字符集把两者分开，不把 `model:tag` 当命名空间。
+const MAX_NAMESPACE_SEGMENT_LEN: usize = 12;
+
+/// [`clean_model_id_for_pricing`] 按 `model:tag` 的习惯只留冒号前那段，于是「命名空间在前」
+/// 的 id（`cn:deepseek-v4.1-flash`）被裁成 `cn`，任何定价行都匹配不上（实测本机 1.2k+ 行
+/// 成本为 0）。这里补两个兜底候选：整条 id（用户可能就按日志里的写法配了价，如
+/// `global:deepseek-v4.1-flash`），以及去掉命名空间后的模型名（回落通用定价）。
+fn namespace_prefixed_candidates(model_id: &str) -> Vec<String> {
+    let Some((namespace, rest)) = model_id.split_once(':') else {
+        return Vec::new();
+    };
+    // 厂商路径前缀（`vendor/model`）由清洗层处理，这里只看最后一段
+    let namespace = namespace
+        .rsplit('/')
+        .next()
+        .unwrap_or(namespace)
+        .trim()
+        .to_ascii_lowercase();
+    if namespace.is_empty()
+        || namespace.len() > MAX_NAMESPACE_SEGMENT_LEN
+        || !namespace
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    {
+        return Vec::new();
+    }
+
+    let mut candidates = Vec::new();
+    push_unique_candidate(&mut candidates, normalize_model_id_verbatim(model_id));
+    push_unique_candidate(&mut candidates, normalize_model_id_verbatim(rest));
+    candidates
+}
+
+/// 与 [`clean_model_id_for_pricing`] 同样的归一化，但不裁路径、不裁冒号：留给「整条 id 就是
+/// 定价表里的键」这种情况。空串不入选。
+fn normalize_model_id_verbatim(model_id: &str) -> String {
+    let normalized = model_id.trim().replace('@', "-").to_ascii_lowercase();
+    normalized
+        .trim_end_matches(crate::claude_desktop_config::ONE_M_CONTEXT_MARKER)
+        .trim()
+        .to_string()
 }
 
 fn clean_model_id_for_pricing(model_id: &str) -> String {
@@ -3548,6 +3598,84 @@ mod tests {
         assert_eq!(input_cost, "0.300000");
         assert_eq!(output_cost, "1.200000");
         assert_eq!(total_cost, "1.500000");
+
+        Ok(())
+    }
+
+    #[test]
+    fn pricing_candidates_cover_namespace_prefixed_models() {
+        let candidates = model_pricing_candidates("cn:deepseek-v4.1-flash");
+
+        // 清洗层按 `model:tag` 的习惯只留冒号前那段（`cn`），所以整条 id 与去掉命名空间的
+        // 模型名都要补成兜底候选，否则这类行永远匹配不上任何定价。
+        assert!(candidates.contains(&"cn:deepseek-v4.1-flash".to_string()));
+        assert!(candidates.contains(&"deepseek-v4.1-flash".to_string()));
+
+        // 整条 id 排在前面：用户按日志里的写法配的价，优先于通用定价。
+        let full = candidates
+            .iter()
+            .position(|candidate| candidate == "cn:deepseek-v4.1-flash")
+            .expect("full id candidate");
+        let stripped = candidates
+            .iter()
+            .position(|candidate| candidate == "deepseek-v4.1-flash")
+            .expect("namespace-stripped candidate");
+        assert!(full < stripped);
+    }
+
+    #[test]
+    fn pricing_candidates_do_not_read_suffix_tags_as_namespaces() {
+        // `model:tag`（冒号在后）沿用原语义：只留冒号前那段，不把 tag 当模型名。
+        let candidates = model_pricing_candidates("deepseek-v4.1-flash:free");
+
+        assert!(candidates.contains(&"deepseek-v4.1-flash".to_string()));
+        assert!(!candidates.contains(&"free".to_string()));
+        assert!(!candidates.contains(&"deepseek-v4.1-flash:free".to_string()));
+    }
+
+    #[test]
+    fn test_backfill_missing_usage_costs_matches_namespace_prefixed_model() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        // 种子库里已经有真实模型的定价，探针用独立的名字，免得撞 UNIQUE。
+        let prefixed = "cn:realm-probe-model";
+        let bare = "realm-probe-model";
+
+        {
+            let conn = lock_conn!(db.conn);
+            insert_usage_log(
+                &conn,
+                "cn-realm-probe-zero-cost",
+                "claude",
+                "test-provider",
+                prefixed,
+                "proxy",
+                1000,
+                1_000_000,
+                1_000_000,
+                0,
+                0,
+                200,
+                "0",
+            )?;
+            conn.execute(
+                "INSERT INTO model_pricing (model_id, display_name, input_cost_per_million, output_cost_per_million)
+                 VALUES (?1, 'Realm Probe Model', '0.15', '0.6')",
+                [bare],
+            )?;
+        }
+
+        assert_eq!(db.backfill_missing_usage_costs()?, 1);
+
+        let conn = lock_conn!(db.conn);
+        let (input_cost, output_cost, total_cost): (String, String, String) = conn.query_row(
+            "SELECT input_cost_usd, output_cost_usd, total_cost_usd
+             FROM proxy_request_logs WHERE request_id = 'cn-realm-probe-zero-cost'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(input_cost, "0.150000");
+        assert_eq!(output_cost, "0.600000");
+        assert_eq!(total_cost, "0.750000");
 
         Ok(())
     }
