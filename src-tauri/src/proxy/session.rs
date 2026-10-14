@@ -182,9 +182,22 @@ fn extract_responses_session(
 fn extract_from_metadata(body: &serde_json::Value) -> Option<SessionIdResult> {
     let metadata = body.get("metadata")?;
 
-    // 1. 从 metadata.user_id 提取（JSON 字符串或旧版 _session_ 后缀）
-    if let Some(user_id) = metadata.get("user_id").and_then(|v| v.as_str()) {
-        if let Some(session_id) = parse_session_from_user_id(user_id) {
+    // 1. 从 metadata.user_id 提取（支持 Claude Code JSON 格式及 legacy user_xxx_session_yyy）
+    if let Some(user_id_val) = metadata.get("user_id") {
+        let parsed_sid = if let Some(user_id_str) = user_id_val.as_str() {
+            parse_session_from_user_id(user_id_str)
+        } else if let Some(user_id_obj) = user_id_val.as_object() {
+            user_id_obj
+                .get("session_id")
+                .or_else(|| user_id_obj.get("sessionId"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(ToString::to_string)
+        } else {
+            None
+        };
+
+        if let Some(session_id) = parsed_sid {
             return Some(SessionIdResult {
                 session_id,
                 source: SessionIdSource::MetadataUserId,
@@ -194,7 +207,11 @@ fn extract_from_metadata(body: &serde_json::Value) -> Option<SessionIdResult> {
     }
 
     // 2. 直接从 metadata.session_id 提取
-    if let Some(session_id) = metadata.get("session_id").and_then(|v| v.as_str()) {
+    if let Some(session_id) = metadata
+        .get("session_id")
+        .or_else(|| metadata.get("sessionId"))
+        .and_then(|v| v.as_str())
+    {
         if !session_id.is_empty() {
             return Some(SessionIdResult {
                 session_id: session_id.to_string(),
@@ -209,14 +226,20 @@ fn extract_from_metadata(body: &serde_json::Value) -> Option<SessionIdResult> {
 
 /// 从 user_id 解析 session_id
 ///
-/// 支持 JSON 对象字符串中的 `session_id` 和旧版 `user_identifier_session_actual_session_id`。
+/// 支持格式:
+/// 1. Claude Code JSON 字符串: `{"session_id":"...", ...}`（`sessionId` 亦接受）
+/// 2. Legacy 格式: `user_identifier_session_actual_session_id`
 pub(super) fn parse_session_from_user_id(user_id: &str) -> Option<String> {
     let trimmed = user_id.trim();
     if trimmed.starts_with('{') {
         // 新版 Claude Code 将会话元数据编码为 JSON 字符串。只读取当前 session_id，
         // 不把 device/account/parent ID 或 JSON 字段里的 _session_ 文本当作会话。
         let metadata: serde_json::Value = serde_json::from_str(trimmed).ok()?;
-        let session_id = metadata.get("session_id")?.as_str()?.trim();
+        let session_id = metadata
+            .get("session_id")
+            .or_else(|| metadata.get("sessionId"))?
+            .as_str()?
+            .trim();
         return (!session_id.is_empty()).then(|| session_id.to_string());
     }
 
@@ -332,6 +355,45 @@ mod tests {
         let result = extract_session_id(&headers, &body, "claude");
 
         assert_eq!(result.session_id, "abc123def456");
+        assert_eq!(result.source, SessionIdSource::MetadataUserId);
+        assert!(result.client_provided);
+    }
+
+    #[test]
+    fn test_extract_session_from_claude_code_json_string_user_id() {
+        let headers = HeaderMap::new();
+        let body = json!({
+            "model": "claude-3-5-sonnet",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "metadata": {
+                "user_id": "{\"device_id\":\"dev-123\",\"session_id\":\"claudecode-session-456\"}"
+            }
+        });
+
+        let result = extract_session_id(&headers, &body, "claude");
+
+        assert_eq!(result.session_id, "claudecode-session-456");
+        assert_eq!(result.source, SessionIdSource::MetadataUserId);
+        assert!(result.client_provided);
+    }
+
+    #[test]
+    fn test_extract_session_from_claude_code_json_object_user_id() {
+        let headers = HeaderMap::new();
+        let body = json!({
+            "model": "claude-3-5-sonnet",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "metadata": {
+                "user_id": {
+                    "device_id": "dev-123",
+                    "session_id": "claudecode-session-789"
+                }
+            }
+        });
+
+        let result = extract_session_id(&headers, &body, "claude");
+
+        assert_eq!(result.session_id, "claudecode-session-789");
         assert_eq!(result.source, SessionIdSource::MetadataUserId);
         assert!(result.client_provided);
     }
