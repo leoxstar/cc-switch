@@ -142,6 +142,7 @@ export function useSettingsForm(): UseSettingsFormResult {
         mcode: data.visibleApps?.mcode ?? true,
         kimi: data.visibleApps?.kimi ?? true,
       },
+      deepseekHarnessSessionDir: sanitizeDir(data.deepseekHarnessSessionDir),
       language: normalizedLanguage,
     };
 
@@ -213,6 +214,9 @@ export function useSettingsForm(): UseSettingsFormResult {
         opencodeConfigDir: sanitizeDir(serverData.opencodeConfigDir),
         openclawConfigDir: sanitizeDir(serverData.openclawConfigDir),
         piConfigDir: sanitizeDir(serverData.piConfigDir),
+        deepseekHarnessSessionDir: sanitizeDir(
+          serverData.deepseekHarnessSessionDir,
+        ),
         language: normalizedLanguage,
       };
 

@@ -459,6 +459,8 @@ export interface Settings {
   piConfigDir?: string;
   // 覆盖 Kimi 配置目录（可选）
   kimiConfigDir?: string;
+  // 覆盖 DeepSeek Harness 会话日志根目录（可选）
+  deepseekHarnessSessionDir?: string;
 
   // ===== 当前供应商 ID（设备级）=====
   // 当前 Claude 供应商 ID（优先于数据库 is_current）
