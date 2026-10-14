@@ -244,7 +244,7 @@ pub fn set_provider(name: &str, settings: Value) -> Result<(), AppError> {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let default_model = settings
+    let _default_model = settings
         .get("default_model")
         .and_then(Value::as_str)
         .map(|s| s.trim().to_string())
@@ -669,8 +669,7 @@ fn collect_models_for_provider(doc: &DocumentMut, provider: &str) -> Vec<Value> 
 fn first_remaining_model_id(doc: &DocumentMut) -> Option<String> {
     doc.get("models")
         .and_then(Item::as_table)
-        .map(|t| t.iter().next().map(|(alias, _)| alias.to_string()))
-        .flatten()
+        .and_then(|t| t.iter().next().map(|(alias, _)| alias.to_string()))
 }
 
 /// 更新顶层 `default_model`，保留既有键的前导注释（如文件头说明）。
@@ -682,8 +681,7 @@ fn upsert_default_model(doc: &mut DocumentMut, value: &str) {
     let root = doc.as_table_mut();
     let prefix = root
         .get_key_value("default_model")
-        .map(|(key, _)| key.decor().prefix().cloned())
-        .flatten();
+        .and_then(|(key, _)| key.decor().prefix().cloned());
     root.remove("default_model");
     let mut key = toml_edit::Key::new("default_model");
     if let Some(prefix) = prefix {
@@ -700,11 +698,7 @@ fn item_to_json(item: &Item) -> Option<Value> {
         Some(Value::Number(i.into()))
     } else if let Some(f) = item.as_float() {
         serde_json::Number::from_f64(f).map(Value::Number)
-    } else if let Some(b) = item.as_bool() {
-        Some(Value::Bool(b))
-    } else {
-        None
-    }
+    } else { item.as_bool().map(Value::Bool) }
 }
 
 #[cfg(test)]

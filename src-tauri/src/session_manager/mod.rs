@@ -64,7 +64,7 @@ pub fn scan_sessions() -> Vec<SessionMeta> {
         let h5 = s.spawn(gemini::scan_sessions);
         let h6 = s.spawn(hermes::scan_sessions);
         let h7 = s.spawn(grokbuild::scan_sessions);
-        let h8 = s.spawn(pi::scan_sessions);
+        let _h8 = s.spawn(pi::scan_sessions);
         let h8 = s.spawn(kimi::scan_sessions);
         (
             h1.join().unwrap_or_default(),
