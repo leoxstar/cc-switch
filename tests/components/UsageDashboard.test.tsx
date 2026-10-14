@@ -19,6 +19,7 @@ const usageApiMock = vi.hoisted(() => ({
   syncSessionUsage: vi.fn(),
   getSessionUsageLastSync: vi.fn(),
   rebuildCodexUsage: vi.fn(),
+  rebuildClaudeUsage: vi.fn(),
 }));
 
 vi.mock("react-i18next", () => ({

@@ -22,6 +22,7 @@ const usageApiMock = vi.hoisted(() => ({
   syncSessionUsage: vi.fn(),
   getSessionUsageLastSync: vi.fn().mockResolvedValue(null),
   rebuildCodexUsage: vi.fn(),
+  rebuildClaudeUsage: vi.fn(),
 }));
 
 // t 要稳定：真实的 i18next 也只在切语言时换 t，组件里有依赖 t 的 effect

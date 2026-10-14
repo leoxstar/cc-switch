@@ -30,8 +30,10 @@ interface UsageDataSourcesSheetProps {
   /** 打开设置 → 本地路由（「记录请求用量」开关在那里） */
   onOpenRoutingSettings?: () => void;
   rebuildingCodex: boolean;
+  rebuildingClaude: boolean;
   /** 只负责打开确认框；确认框里写清后果 */
   onRebuildCodex: () => void;
+  onRebuildClaude: () => void;
 }
 
 function SourceCard({
@@ -92,6 +94,8 @@ export function UsageDataSourcesSheet({
   onOpenRoutingSettings,
   rebuildingCodex,
   onRebuildCodex,
+  rebuildingClaude,
+  onRebuildClaude,
 }: UsageDataSourcesSheetProps) {
   const { t, i18n } = useTranslation();
   const coveredApps = joinNames(
@@ -172,6 +176,32 @@ export function UsageDataSourcesSheet({
                 <ChevronRight className="h-3.5 w-3.5" />
               </button>
             )}
+          </SourceCard>
+
+          <SourceCard
+            title={t("usage.rebuildClaude.title")}
+            help={{
+              title: t("usage.sources.claudeHelpTitle"),
+              body: t("usage.rebuildClaude.description"),
+            }}
+          >
+            <p className="m-0 text-caption text-fg-2">
+              {t("usage.rebuildClaude.warning")}
+            </p>
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="neutral"
+                size="compact"
+                disabled={rebuildingClaude}
+                onClick={onRebuildClaude}
+              >
+                {rebuildingClaude && (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                )}
+                {t("usage.rebuildClaude.actionEllipsis")}
+              </Button>
+            </div>
           </SourceCard>
 
           <SourceCard

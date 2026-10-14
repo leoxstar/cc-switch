@@ -176,6 +176,9 @@ export function UsageDashboard({
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [showRebuildConfirm, setShowRebuildConfirm] = useState(false);
   const [rebuildingCodex, setRebuildingCodex] = useState(false);
+  const [showRebuildClaudeConfirm, setShowRebuildClaudeConfirm] =
+    useState(false);
+  const [rebuildingClaude, setRebuildingClaude] = useState(false);
   const [syncingSession, setSyncingSession] = useState(false);
   const [lastManualSyncAt, setLastManualSyncAt] = useState(
     lastManualSessionSyncAt,
@@ -235,6 +238,30 @@ export function UsageDashboard({
         error,
       );
       setRefreshIntervalMs(previous);
+    }
+  };
+
+  const rebuildClaudeUsage = async () => {
+    setShowRebuildClaudeConfirm(false);
+    setRebuildingClaude(true);
+    try {
+      const result = await usageApi.rebuildClaudeUsage();
+      await queryClient.invalidateQueries({ queryKey: usageKeys.all });
+      const message = t("usage.rebuildClaude.completed", {
+        imported: result.imported,
+        errors: result.errors.length,
+        suspected: result.suspectedDuplicates,
+        deferred: result.deferredFiles,
+      });
+      if (result.errors.length > 0 || result.deferredFiles > 0) {
+        toast.warning(message);
+      } else {
+        toast.success(message);
+      }
+    } catch (error) {
+      toast.error(t("usage.rebuildClaude.failed", { error: String(error) }));
+    } finally {
+      setRebuildingClaude(false);
     }
   };
 
@@ -842,6 +869,8 @@ export function UsageDashboard({
         onOpenRoutingSettings={onOpenRoutingSettings}
         rebuildingCodex={rebuildingCodex}
         onRebuildCodex={() => setShowRebuildConfirm(true)}
+        rebuildingClaude={rebuildingClaude}
+        onRebuildClaude={() => setShowRebuildClaudeConfirm(true)}
       />
       <ConfirmDialog
         isOpen={showRebuildConfirm}
@@ -853,6 +882,17 @@ export function UsageDashboard({
         zIndex="top"
         onConfirm={() => void rebuildCodexUsage()}
         onCancel={() => setShowRebuildConfirm(false)}
+      />
+      <ConfirmDialog
+        isOpen={showRebuildClaudeConfirm}
+        title={t("usage.rebuildClaude.confirmTitle")}
+        message={t("usage.rebuildClaude.confirmMessage")}
+        confirmText={t("usage.rebuildClaude.confirmAction")}
+        // 重建前会自动备份数据库，可从备份恢复：不算不可撤销，不用红色确认键
+        variant="info"
+        zIndex="top"
+        onConfirm={() => void rebuildClaudeUsage()}
+        onCancel={() => setShowRebuildClaudeConfirm(false)}
       />
     </div>
   );

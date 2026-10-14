@@ -2387,6 +2387,18 @@
       "failed": "Codex 使用量の再構築に失敗しました：{{error}}",
       "actionEllipsis": "Codex 使用量を再構築"
     },
+    "rebuildClaude": {
+      "title": "Claude 使用量メンテナンス",
+      "description": "ローカルの Claude Code セッションログから使用量を再構築します",
+      "warning": "最初にデータベースを自動バックアップします。元の JSONL が削除済みの履歴は再インポートできません。",
+      "action": "Claude 使用量を再構築",
+      "confirmTitle": "Claude 使用量を再構築しますか？",
+      "confirmMessage": "既存の Claude セッション明細と集計を削除し、ローカルの Claude Code ログから再インポートします。\n\n削除済みログの履歴は失われます。",
+      "confirmAction": "バックアップして再構築",
+      "completed": "再構築完了：{{imported}} 件インポート、{{errors}} 件エラー、重複候補 {{suspected}} 件、保留ファイル {{deferred}} 件",
+      "failed": "Claude 使用量の再構築に失敗しました：{{error}}",
+      "actionEllipsis": "Claude 使用量を再構築"
+    },
     "totalRecords": "全 {{total}} 件",
     "goToPage": "移動",
     "pageInputPlaceholder": "ページ",
@@ -2632,6 +2644,7 @@
       "off": "オフ",
       "editLogging": "「リクエストの使用量を記録」を変更",
       "codexHelpTitle": "Codex 使用量メンテナンスとは",
+      "claudeHelpTitle": "Claude 使用量メンテナンスとは",
       "lastSynced": "前回の同期：{{time}}"
     },
     "empty": {

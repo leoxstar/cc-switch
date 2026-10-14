@@ -1361,9 +1361,181 @@ pub fn get_data_source_breakdown(db: &Database) -> Result<Vec<DataSourceSummary>
     Ok(summaries)
 }
 
+
+/// Claude 会话日志的游标判定：只认本项目目录下的 `.jsonl`。
+fn is_claude_session_cursor_path(file_path: &str, projects_dir: &Path) -> bool {
+    let file_name = file_path.rsplit(['/', '\\']).next().unwrap_or_default();
+    file_name.ends_with(".jsonl") && Path::new(file_path).starts_with(projects_dir)
+}
+
+fn sqlite_table_exists(conn: &rusqlite::Connection, table: &str) -> Result<bool, AppError> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [table],
+        |row| row.get(0),
+    )
+    .map_err(|error| AppError::Database(format!("查询表 {table} 失败: {error}")))
+}
+
+fn sqlite_column_exists(
+    conn: &rusqlite::Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, AppError> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+        rusqlite::params![table, column],
+        |row| row.get(0),
+    )
+    .map_err(|error| AppError::Database(format!("查询列 {table}.{column} 失败: {error}")))
+}
+
+/// Claude 会话用量重建前的清理：会话明细（`data_source='session_log'`）、对应的日聚合
+/// （`provider_id='_session'`）与该目录下的同步游标。与 Codex 的
+/// [`crate::services::session_usage_codex::reset_codex_usage_on_conn`] 对称。
+pub(crate) fn reset_claude_session_usage_on_conn(
+    conn: &rusqlite::Connection,
+    projects_dir: &Path,
+) -> Result<(), AppError> {
+    if sqlite_table_exists(conn, "proxy_request_logs")?
+        && sqlite_column_exists(conn, "proxy_request_logs", "data_source")?
+    {
+        conn.execute(
+            "DELETE FROM proxy_request_logs WHERE data_source = 'session_log'",
+            [],
+        )
+        .map_err(|error| AppError::Database(format!("清理 Claude 会话明细失败: {error}")))?;
+    }
+    if sqlite_table_exists(conn, "usage_daily_rollups")?
+        && sqlite_column_exists(conn, "usage_daily_rollups", "provider_id")?
+    {
+        conn.execute(
+            "DELETE FROM usage_daily_rollups WHERE provider_id = '_session'",
+            [],
+        )
+        .map_err(|error| AppError::Database(format!("清理 Claude 用量汇总失败: {error}")))?;
+    }
+    if sqlite_table_exists(conn, "session_log_sync")?
+        && sqlite_column_exists(conn, "session_log_sync", "file_path")?
+    {
+        let paths = {
+            let mut statement = conn.prepare("SELECT file_path FROM session_log_sync").map_err(
+                |error| AppError::Database(format!("读取会话同步 cursor 失败: {error}")),
+            )?;
+            let paths = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(|error| AppError::Database(format!("查询会话同步 cursor 失败: {error}")))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| AppError::Database(format!("解析会话同步 cursor 失败: {error}")))?;
+            paths
+        };
+        for file_path in paths
+            .into_iter()
+            .filter(|path| is_claude_session_cursor_path(path, projects_dir))
+        {
+            conn.execute(
+                "DELETE FROM session_log_sync WHERE file_path = ?1",
+                [file_path],
+            )
+            .map_err(|error| AppError::Database(format!("清理会话同步 cursor 失败: {error}")))?;
+        }
+    }
+    Ok(())
+}
+
+impl Database {
+    /// 只做"清 Claude 会话明细 + 汇总 + 游标"；备份由调用方负责。
+    pub(crate) fn reset_claude_usage(&self) -> Result<(), AppError> {
+        let projects_dir = get_claude_config_dir().join("projects");
+        let conn = lock_conn!(self.conn);
+        conn.execute("SAVEPOINT reset_claude_usage", [])
+            .map_err(|error| AppError::Database(format!("开启 Claude 重建事务失败: {error}")))?;
+        match reset_claude_session_usage_on_conn(&conn, &projects_dir) {
+            Ok(()) => {
+                conn.execute("RELEASE reset_claude_usage", []).map_err(|error| {
+                    AppError::Database(format!("提交 Claude 重建事务失败: {error}"))
+                })?;
+                Ok(())
+            }
+            Err(error) => {
+                conn.execute("ROLLBACK TO reset_claude_usage", []).ok();
+                conn.execute("RELEASE reset_claude_usage", []).ok();
+                Err(error)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reset_claude_usage_only_removes_session_log_rows_and_structural_cursors(
+    ) -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let temp = tempfile::tempdir().unwrap();
+        let projects = temp.path().join("projects");
+        let claude_cursor = projects.join("proj-a/session-1.jsonl");
+        let other_cursor = temp.path().join("codex/sessions/rollout-x.jsonl");
+
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute_batch(
+                "INSERT INTO proxy_request_logs (
+                    request_id, provider_id, app_type, model, input_tokens,
+                    output_tokens, cache_read_tokens, latency_ms, status_code,
+                    created_at, data_source
+                 ) VALUES
+                    ('claude-row', '_session', 'claude', 'claude-x', 1, 1, 0, 0, 200, 1, 'session_log'),
+                    ('proxy-row', 'p1', 'claude', 'claude-x', 1, 1, 0, 0, 200, 1, 'proxy');
+                 INSERT INTO usage_daily_rollups (date, app_type, provider_id, model)
+                 VALUES
+                    ('2026-07-10', 'claude', '_session', 'claude-x'),
+                    ('2026-07-10', 'claude', 'p1', 'claude-x');",
+            )?;
+            for path in [claude_cursor, other_cursor] {
+                conn.execute(
+                    "INSERT INTO session_log_sync
+                     (file_path, last_modified, last_line_offset, last_synced_at)
+                     VALUES (?1, 1, 1, 1)",
+                    [path.to_string_lossy().to_string()],
+                )?;
+            }
+
+            reset_claude_session_usage_on_conn(&conn, &projects)?;
+
+            let session_rows: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM proxy_request_logs WHERE data_source = 'session_log'",
+                [],
+                |row| row.get(0),
+            )?;
+            let proxy_rows: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM proxy_request_logs WHERE data_source = 'proxy'",
+                [],
+                |row| row.get(0),
+            )?;
+            let session_rollups: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM usage_daily_rollups WHERE provider_id = '_session'",
+                [],
+                |row| row.get(0),
+            )?;
+            let other_rollups: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM usage_daily_rollups WHERE provider_id = 'p1'",
+                [],
+                |row| row.get(0),
+            )?;
+            let cursors: i64 =
+                conn.query_row("SELECT COUNT(*) FROM session_log_sync", [], |row| row.get(0))?;
+
+            assert_eq!(
+                (session_rows, proxy_rows, session_rollups, other_rollups),
+                (0, 1, 0, 1)
+            );
+            assert_eq!(cursors, 1, "非 Claude 目录下的游标必须保留");
+        }
+        Ok(())
+    }
 
     fn pricing_test_message(model: &str) -> ParsedAssistantUsage {
         ParsedAssistantUsage {

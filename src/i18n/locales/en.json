@@ -2387,6 +2387,18 @@
       "failed": "Codex usage rebuild failed: {{error}}",
       "actionEllipsis": "Rebuild Codex Usage"
     },
+    "rebuildClaude": {
+      "title": "Claude Usage Maintenance",
+      "description": "Rebuild Claude Code session usage from local session logs",
+      "warning": "The database is backed up first. History whose source JSONL has been deleted cannot be re-imported.",
+      "action": "Rebuild Claude Usage",
+      "confirmTitle": "Rebuild Claude usage?",
+      "confirmMessage": "This clears existing Claude session details and rollups, then imports them again from local Claude Code logs.\n\nHistory with deleted logs will be lost.",
+      "confirmAction": "Back Up and Rebuild",
+      "completed": "Rebuild complete: {{imported}} imported, {{errors}} errors, {{suspected}} suspected duplicates, {{deferred}} deferred files",
+      "failed": "Claude usage rebuild failed: {{error}}",
+      "actionEllipsis": "Rebuild Claude Usage"
+    },
     "totalRecords": "{{total}} records total",
     "goToPage": "Go",
     "pageInputPlaceholder": "Page",
@@ -2632,6 +2644,7 @@
       "off": "Off",
       "editLogging": "Change “Record request usage”",
       "codexHelpTitle": "What does Codex usage maintenance do?",
+      "claudeHelpTitle": "What does Claude usage maintenance do?",
       "lastSynced": "last synced: {{time}}"
     },
     "empty": {
