@@ -26,6 +26,7 @@ import {
   formatOutputTokensPerSecond,
   getLocaleFromLanguage,
   getResolvedLang,
+  hasMeasuredSessionTiming,
   parseFiniteNumber,
 } from "./format";
 import { appDisplayName } from "./RequestLogTable";
@@ -95,6 +96,8 @@ function useDetailSections(request: RequestLog) {
   const unpriced = isUnpricedUsage(request);
   const multiplier = parseFiniteNumber(request.costMultiplier);
   const isProxy = !request.dataSource || request.dataSource === "proxy";
+  // 实测耗时/首字：路由请求，以及会话导入里客户端自己记了计时的来源（kimi）。
+  const measuredTiming = isProxy || hasMeasuredSessionTiming(request);
   const tps = formatOutputTokensPerSecond(request);
   const estimatedTps = formatEstimatedTokensPerSecond(request);
   const latency = parseFiniteNumber(request.latencyMs);
@@ -226,7 +229,7 @@ function useDetailSections(request: RequestLog) {
   });
 
   let performance: DetailRow[];
-  if (!isProxy) {
+  if (!measuredTiming) {
     // 会话日志的耗时和首字是导入时按日志时间戳估的（耗时 0 = 没估出来）
     if (latency == null || latency <= 0) {
       performance = [

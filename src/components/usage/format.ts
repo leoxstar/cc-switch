@@ -42,14 +42,13 @@ interface OutputTokensPerSecondInput {
 }
 
 /**
- * 一条请求的生成时间（毫秒）= 耗时 − 首字。缺耗时或首字、或差值不大于 0 时返回 null。
- * 只算路由服务记的请求：会话日志的耗时和首字都是按时间戳估的，不算精确速度
- * （会话日志另有估算，见 [getEstimatedTokensPerSecond]）；非流式请求没有首字。
+ * 会话日志导入的请求，耗时是导入时按日志时间戳估的，所以不算精确速度。
+ * 例外：客户端自己记了实测耗时的来源（见 [hasMeasuredSessionTiming]）。
  */
 export function getGenerationMs(
   log: OutputTokensPerSecondInput,
 ): number | null {
-  if (isSessionLogRequest(log)) return null;
+  if (isSessionLogRequest(log) && !hasMeasuredSessionTiming(log)) return null;
   const latencyMs = parseFiniteNumber(log.latencyMs);
   const firstTokenMs = parseFiniteNumber(log.firstTokenMs);
   if (latencyMs == null || firstTokenMs == null) return null;
@@ -103,8 +102,29 @@ export function isSessionLogRequest(log: { dataSource?: unknown }): boolean {
 }
 
 /**
+ * 会话导入里耗时/首字是**客户端实测**的来源（不是导入时按日志时间戳估的）。
+ *
+ * `kimi_session`：`logs/kimi-code.log` 的 `llm response` 行自带 `ttftMs` /
+ * `streamDurationMs`。镜像后端 `MEASURED_TIMING_SESSION_SOURCES`，两边要同步改。
+ */
+const MEASURED_TIMING_SESSION_SOURCES: ReadonlySet<string> = new Set([
+  "kimi_session",
+]);
+
+/** 这条会话导入的请求，耗时和首字是不是客户端实测的（可以按精确口径展示）。 */
+export function hasMeasuredSessionTiming(log: {
+  dataSource?: unknown;
+}): boolean {
+  return (
+    typeof log.dataSource === "string" &&
+    MEASURED_TIMING_SESSION_SOURCES.has(log.dataSource)
+  );
+}
+
+/**
  * 这条请求能不能估速度（和后端 `speed_estimate_eligible_sql` 同口径）：会话日志导入、
  * 输出不少于 200 token、估算耗时不短于 1 秒。推出了首字的也照样按整段耗时算。
+ * 实测耗时的来源不在这里估（走精确口径）。
  */
 export function isSpeedEstimateEligible(
   log: OutputTokensPerSecondInput,
@@ -113,6 +133,7 @@ export function isSpeedEstimateEligible(
   const latencyMs = parseFiniteNumber(log.latencyMs);
   return (
     isSessionLogRequest(log) &&
+    !hasMeasuredSessionTiming(log) &&
     outputTokens != null &&
     outputTokens >= SPEED_ESTIMATE_MIN_OUTPUT_TOKENS &&
     latencyMs != null &&

@@ -2376,6 +2376,7 @@
       "grokbuild": "Grok Build",
       "pi": "Pi",
       "mcode": "MiniMax Code",
+      "kimi": "Kimi Code",
       "label": "アプリで絞り込み"
     },
     "rawInputLabel": "原始",
@@ -4548,7 +4549,8 @@
       "officialStack": "公式アカウントは既定にだけでき、集約には追加できません。",
       "defaultWhileRouting": "ルーティング中は、転送先のプロバイダーがそのまま既定になります。集約に切り替えるときに別のプロバイダーを選べます。",
       "needsRoute": "ルーティングが必要：{{reason}}。直接接続はできません。",
-      "defaultCannotRemove": "既定のプロバイダーは削除できません。先にほかを既定にしてください。",
+            "readOnly": "アプリ自身が管理しています。CC Switch は表示と量の確認のみ行います。",
+"defaultCannotRemove": "既定のプロバイダーは削除できません。先にほかを既定にしてください。",
       "currentCannotRemove": "使用中のプロバイダーは削除できません。先にほかを有効にしてください。",
       "inUseCannotDelete": "使用中のプロバイダーは削除できません。先にほかへ切り替えてください。",
       "noFailover": "公式アカウントはフェイルオーバーキューに入れられません。クライアント自身のログインを使うため、ほかと交代できません。"

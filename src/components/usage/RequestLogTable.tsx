@@ -22,6 +22,7 @@ import {
   formatOutputTokensPerSecond,
   formatTokensCompact,
   getLocaleFromLanguage,
+  hasMeasuredSessionTiming,
   isSessionLogRequest,
   parseFiniteNumber,
 } from "./format";
@@ -181,8 +182,9 @@ export function RequestLogTable({
     const latency = parseFiniteNumber(log.latencyMs);
     const firstToken = parseFiniteNumber(log.firstTokenMs);
     const firstTokenText = formatFirstTokenSeconds(firstToken);
-    // 会话日志的耗时和首字都是按时间戳估的，带 ≈
-    const isSession = isSessionLogRequest(log);
+    // 会话日志导入的请求：耗时/首字按时间戳估的，前面带 ≈；客户端实测的来源不带。
+    const isSession =
+      isSessionLogRequest(log) && !hasMeasuredSessionTiming(log);
     const timing =
       latency != null && latency > 0
         ? {

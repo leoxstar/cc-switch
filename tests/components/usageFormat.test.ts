@@ -162,6 +162,33 @@ describe("usage format helpers", () => {
     });
   });
 
+  it("treats measured session timing (kimi) as exact, not estimated", () => {
+    const kimi = {
+      outputTokens: 1_800,
+      latencyMs: 20_000,
+      firstTokenMs: 4_000,
+      dataSource: "kimi_session",
+    };
+    // 1800 token / (20 s − 4 s) = 112.5 tok/s
+    expect(getOutputTokensPerSecond(kimi)).toBe(112.5);
+    expect(formatOutputTokensPerSecond(kimi)).toBe("113");
+    expect(formatFirstTokenSeconds(kimi.firstTokenMs)).toBe("4.0s");
+    // 实测的不再走估算口径
+    expect(getEstimatedTokensPerSecond(kimi)).toBeNull();
+    expect(sumSpeedTotals([kimi])).toEqual({
+      outputTokens: 1_800,
+      generationMs: 16_000,
+    });
+    // 其它会话来源不受影响：仍然只估、不算精确
+    const claudeSession = { ...kimi, dataSource: "session_log" };
+    expect(getOutputTokensPerSecond(claudeSession)).toBeNull();
+    expect(getEstimatedTokensPerSecond(claudeSession)).toBe(90);
+    // 实测来源但日志里没首字：两样都不算
+    const noFirstToken = { ...kimi, firstTokenMs: undefined };
+    expect(getOutputTokensPerSecond(noFirstToken)).toBeNull();
+    expect(getEstimatedTokensPerSecond(noFirstToken)).toBeNull();
+  });
+
   it("formats first-token time in seconds", () => {
     expect(formatFirstTokenSeconds(2_640)).toBe("2.6s");
     expect(formatFirstTokenSeconds(0)).toBe("0.0s");

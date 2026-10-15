@@ -204,8 +204,18 @@ describe("RequestLogTable", () => {
             latencyMs: 10_000,
             dataSource: "pi_session",
           },
+          // Kimi 的耗时/首字来自 CLI 自己的日志：算精确口径，不带 ≈
+          {
+            ...base,
+            appType: "kimi",
+            requestId: "kimi-session-measured",
+            outputTokens: 900,
+            latencyMs: 10_000,
+            firstTokenMs: 3_300,
+            dataSource: "kimi_session",
+          },
         ],
-        total: 6,
+        total: 7,
         page: 0,
         pageSize: 20,
       },
@@ -222,7 +232,7 @@ describe("RequestLogTable", () => {
     );
 
     const rows = screen.getAllByRole("row").slice(1);
-    expect(rows).toHaveLength(6);
+    expect(rows).toHaveLength(7);
     // 最后两列：速度、首字
     const speedCell = (row: HTMLElement) =>
       row.children[row.children.length - 2];
@@ -253,6 +263,11 @@ describe("RequestLogTable", () => {
       "usage.estimatedTimingTip",
     );
     expect(firstTokenCell(rows[5])).toHaveTextContent("—");
+    // Kimi：900 token / (10 s − 3.3 s) = 134 tok/s，实测口径不带 ≈
+    expect(speedCell(rows[6])).toHaveTextContent("134tok/s");
+    expect(speedCell(rows[6])).toHaveAttribute("title", "usage.timingTip");
+    expect(firstTokenCell(rows[6])).toHaveTextContent("3.3s");
+    expect(firstTokenCell(rows[6])).not.toHaveTextContent("≈");
     expect(
       screen.getByRole("columnheader", { name: /usage.firstToken/ }),
     ).toBeInTheDocument();
