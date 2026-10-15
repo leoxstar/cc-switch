@@ -151,14 +151,32 @@ pub const SPEED_MIN_OUTPUT_TOKENS: i64 = 100;
 /// 或短回复整段落在同一个网络包里，算出来的是传输突发而不是生成速度。
 pub const SPEED_MIN_GENERATION_MS: i64 = 100;
 
+/// 会话导入里耗时/首字是**客户端实测**的来源（不是导入时按日志时间戳估的）。
+///
+/// `kimi_session`：`logs/kimi-code.log` 的 `llm response` 行自带 `ttftMs` /
+/// `streamDurationMs`，是 CLI 自己测的，所以算精确口径而不是估算口径。
+/// 新增这类导入器时要同时改前端 `src/components/usage/format.ts` 的同名常量。
+pub const MEASURED_TIMING_SESSION_SOURCES: &[&str] = &["kimi_session"];
+
+/// `data_source` 属于「会话导入但耗时是实测」的 SQL 条件。
+fn measured_timing_source_sql(alias: &str) -> String {
+    let list = MEASURED_TIMING_SESSION_SOURCES
+        .iter()
+        .map(|source| format!("'{source}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{} IN ({list})", data_source_expr(alias))
+}
+
 /// 明细行能不能计速度的 SQL 条件（和前端 `isSpeedEligible` 同口径）。会话日志导入的行
 /// 也可能有首字（按时间戳推出来的），所以先按来源分开，不能只看有没有首字。
 fn speed_eligible_sql(alias: &str) -> String {
     let data_source = data_source_expr(alias);
     format!(
-        "{data_source} = 'proxy' AND {alias}.first_token_ms IS NOT NULL \
+        "({data_source} = 'proxy' OR {}) AND {alias}.first_token_ms IS NOT NULL \
          AND {alias}.output_tokens >= {SPEED_MIN_OUTPUT_TOKENS} \
-         AND {alias}.latency_ms - {alias}.first_token_ms >= {SPEED_MIN_GENERATION_MS}"
+         AND {alias}.latency_ms - {alias}.first_token_ms >= {SPEED_MIN_GENERATION_MS}",
+        measured_timing_source_sql(alias)
     )
 }
 
@@ -173,30 +191,37 @@ pub const SPEED_ESTIMATE_MIN_DURATION_MS: i64 = 1000;
 /// 明细行能不能估速度的 SQL 条件（和前端 `isSpeedEstimateEligible` 同口径）：
 /// 会话日志导入的行，耗时是导入时按日志时间戳估的。估算速度仍按整段耗时算（含首字
 /// 等待），不减推出来的首字：只有部分请求推得出首字，减了会让同一行里两种算法混在一起。
+/// 实测耗时的来源（[`MEASURED_TIMING_SESSION_SOURCES`]）走精确口径，不在这里估。
 fn speed_estimate_eligible_sql(alias: &str) -> String {
     let data_source = data_source_expr(alias);
     format!(
-        "{data_source} <> 'proxy' \
+        "{data_source} <> 'proxy' AND NOT ({}) \
          AND {alias}.output_tokens >= {SPEED_ESTIMATE_MIN_OUTPUT_TOKENS} \
-         AND {alias}.latency_ms >= {SPEED_ESTIMATE_MIN_DURATION_MS}"
+         AND {alias}.latency_ms >= {SPEED_ESTIMATE_MIN_DURATION_MS}",
+        measured_timing_source_sql(alias)
     )
 }
 
 /// 明细行能不能计首字时间的 SQL 条件：经路由服务、成功、有首字计时（流式请求）。
+/// 会话导入里实测首字的来源（[`MEASURED_TIMING_SESSION_SOURCES`]）同样算实测。
 fn first_token_eligible_sql(alias: &str) -> String {
     let data_source = data_source_expr(alias);
     format!(
-        "{data_source} = 'proxy' AND {alias}.first_token_ms IS NOT NULL \
-         AND {alias}.status_code >= 200 AND {alias}.status_code < 300"
+        "({data_source} = 'proxy' OR {}) AND {alias}.first_token_ms IS NOT NULL \
+         AND {alias}.status_code >= 200 AND {alias}.status_code < 300",
+        measured_timing_source_sql(alias)
     )
 }
 
 /// 估算首字的 SQL 条件：会话日志导入、导入时按时间戳推出了首字的行。
 /// 和路由的精确首字分开取中位数：估算的起点是上一条日志写盘的时刻，含客户端
-/// 组装请求的时间，系统性偏高。
+/// 组装请求的时间，系统性偏高。实测来源（[`MEASURED_TIMING_SESSION_SOURCES`]）不在此列。
 fn est_first_token_eligible_sql(alias: &str) -> String {
     let data_source = data_source_expr(alias);
-    format!("{data_source} <> 'proxy' AND {alias}.first_token_ms IS NOT NULL")
+    format!(
+        "{data_source} <> 'proxy' AND NOT ({}) AND {alias}.first_token_ms IS NOT NULL",
+        measured_timing_source_sql(alias)
+    )
 }
 
 /// 按分组键取首字时间的中位数（毫秒）。首字时间长尾明显，偶尔一次排队就是十几秒，
@@ -3634,7 +3659,8 @@ mod tests {
     }
 
     #[test]
-    fn test_backfill_missing_usage_costs_matches_namespace_prefixed_model() -> Result<(), AppError> {
+    fn test_backfill_missing_usage_costs_matches_namespace_prefixed_model() -> Result<(), AppError>
+    {
         let db = Database::memory()?;
         // 种子库里已经有真实模型的定价，探针用独立的名字，免得撞 UNIQUE。
         let prefixed = "cn:realm-probe-model";
@@ -5533,6 +5559,98 @@ mod tests {
         Ok(())
     }
 
+    /// 会话导入里实测耗时的来源（kimi）算精确口径：进 speed_*，不进 est_*。
+    #[test]
+    fn test_get_provider_stats_treats_measured_session_timing_as_exact() -> Result<(), AppError> {
+        let db = Database::memory()?;
+
+        {
+            let conn = lock_conn!(db.conn);
+            let insert = |id: &str,
+                          provider_id: &str,
+                          app_type: &str,
+                          output: i64,
+                          latency: i64,
+                          first_token: Option<i64>,
+                          source: &str| {
+                conn.execute(
+                    "INSERT INTO proxy_request_logs (
+                        request_id, provider_id, app_type, model,
+                        input_tokens, output_tokens, total_cost_usd,
+                        latency_ms, first_token_ms, status_code, created_at, data_source
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    params![
+                        id,
+                        provider_id,
+                        app_type,
+                        "k3",
+                        10,
+                        output,
+                        "0",
+                        latency,
+                        first_token,
+                        200,
+                        1000,
+                        source
+                    ],
+                )
+            };
+            // 实测：3000 token / 5000ms 里首字 1000ms → 生成 4000ms
+            insert(
+                "kimi-a",
+                "_kimi_session",
+                "kimi",
+                3_000,
+                5_000,
+                Some(1_000),
+                "kimi_session",
+            )?;
+            // 实测但没首字（日志缺了）：不算速度
+            insert(
+                "kimi-b",
+                "_kimi_session",
+                "kimi",
+                3_000,
+                5_000,
+                None,
+                "kimi_session",
+            )?;
+            // 估算来源：仍然进 est_*
+            insert(
+                "est-a",
+                "_session",
+                "claude",
+                2_000,
+                20_000,
+                Some(1_500),
+                "session_log",
+            )?;
+        }
+
+        let stats = db.get_provider_stats(None, None, None, None, None)?;
+        let kimi = stats
+            .iter()
+            .find(|s| s.provider_id == "_kimi_session")
+            .expect("kimi 分组");
+        assert_eq!(kimi.speed_output_tokens, 3_000);
+        assert_eq!(kimi.speed_generation_ms, 4_000);
+        assert_eq!(kimi.est_speed_output_tokens, 0, "实测的不该再进估算口径");
+        assert_eq!(kimi.first_token_median_ms, Some(1_000));
+        assert_eq!(
+            kimi.est_first_token_median_ms, None,
+            "实测首字不该进估算首字的中位数"
+        );
+
+        let est = stats
+            .iter()
+            .find(|s| s.provider_id == "_session")
+            .expect("估算分组");
+        assert_eq!(est.est_speed_output_tokens, 2_000);
+        assert_eq!(est.speed_output_tokens, 0);
+
+        Ok(())
+    }
+
     #[test]
     fn test_get_provider_stats_labels_opencode_session_provider() -> Result<(), AppError> {
         let db = Database::memory()?;
@@ -6148,9 +6266,24 @@ mod tests {
             "缺少专门 effort 价格时应回退到 gpt-5.4 基础模型定价"
         );
 
-        // Kimi Code 是订阅/额度模型，不应伪装成公开按 token 计费模型
+        // Kimi Code 是订阅/额度模型：官方没有 token 单价，这里按套餐当前模型（K2.6）
+        // 给了一条估算价，否则用量页整列都是「未定价」。
         let result = find_model_pricing_row(&conn, "kimi-for-coding")?;
-        assert!(result.is_none(), "kimi-for-coding 没有固定 token 单价");
+        assert_eq!(
+            result,
+            Some((
+                "0.95".to_string(),
+                "4.00".to_string(),
+                "0.16".to_string(),
+                "0".to_string()
+            )),
+            "kimi-for-coding 应有按 K2.6 估算的单价"
+        );
+        let result = find_model_pricing_row(&conn, "kimi-code/kimi-for-coding")?;
+        assert!(
+            result.is_some(),
+            "带 provider 命名空间的别名应清洗后匹配到同一条估算价"
+        );
 
         // 测试不存在的模型
         let result = find_model_pricing_row(&conn, "unknown-model-123")?;

@@ -705,6 +705,33 @@ export function buildAdditiveSections(input: AdditiveInput): ProviderSection[] {
 
   for (const p of providers) {
     const chips: CardChip[] = [];
+
+    // 只读行（如 MiniMax Code 官方账号）：内容来自应用自身状态，cc-switch 不写它的配置，
+    // 所以不给任何会改配置的按钮（加/启用/移除都不给），编辑/删除也标出原因。
+    // 标记由后端合成（见 provider.rs 的 `ProviderMeta.read_only`）；这里的本地断言是为了
+    // 不动 `ProviderMeta` 那个 `Record<string, any>` 的历史签名。
+    const readOnly =
+      (p.meta as { readOnly?: boolean } | undefined)?.readOnly === true;
+    if (readOnly) {
+      const reason = t("providerCard.reason.readOnly");
+      chips.push({
+        key: "official",
+        label: t("providerCard.chip.official"),
+        tone: "outline",
+        title: reason,
+      });
+      added.push({
+        provider: p,
+        presentation: {
+          chips,
+          editDisabledReason: reason,
+          deleteDisabledReason: reason,
+          buttons: [],
+        },
+      });
+      continue;
+    }
+
     const isOmo = p.category === "omo";
     const isOmoSlim = p.category === "omo-slim";
     if (isOmo) chips.push({ key: "omo", label: "OMO", tone: "outline" });

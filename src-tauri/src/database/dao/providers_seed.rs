@@ -14,6 +14,8 @@ use crate::app_config::AppType;
 pub(crate) const CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID: &str = "claude-desktop-official";
 pub(crate) const CODEX_OFFICIAL_PROVIDER_ID: &str = "codex-official";
 pub(crate) const GROKBUILD_OFFICIAL_PROVIDER_ID: &str = "grokbuild-official";
+/// MiniMax Code 官方账号的只读展示行 id（不是种子：它是按 MCode 的登录状态合成的，不落库）。
+pub(crate) const MCODE_OFFICIAL_PROVIDER_ID: &str = "mcode-official";
 
 /// 单条官方供应商种子定义。
 pub(crate) struct OfficialProviderSeed {

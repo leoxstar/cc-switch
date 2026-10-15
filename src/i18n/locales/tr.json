@@ -2157,6 +2157,7 @@
       "grokbuild": "Grok Build",
       "pi": "Pi",
       "mcode": "MiniMax Code",
+      "kimi": "Kimi Code",
       "label": "Uygulamaya göre filtrele"
     },
     "rawInputLabel": "Ham",
@@ -4218,7 +4219,8 @@
       "officialStack": "Resmi hesaplar yalnızca varsayılan olabilir; topluluğa katılamazlar.",
       "defaultWhileRouting": "Yönlendirme sırasında varsayılan, yönlendirdiğiniz sağlayıcıdır. Birleştirme'ya geçerken başka bir tane seçebilirsiniz.",
       "needsRoute": "Yönlendirme gerekiyor: {{reason}}; doğrudan bağlanamıyorum.",
-      "defaultCannotRemove": "Varsayılan kaldırılamaz. Önce başka bir sağlayıcıyı varsayılan yapın.",
+            "readOnly": "Uygulamanın kendisi yönetir; CC Switch yalnızca gösterir ve kotayı okur.",
+"defaultCannotRemove": "Varsayılan kaldırılamaz. Önce başka bir sağlayıcıyı varsayılan yapın.",
       "currentCannotRemove": "Kullanılan sağlayıcı kaldırılamaz. Önce başka birini etkinleştirin.",
       "inUseCannotDelete": "Kullanılan sağlayıcı silinemez. Önce diğerine geçin.",
       "noFailover": "Resmi hesaplar yedek sağlayıcıya geçiş kuyruğuna katılamaz: İstemcinin kendi oturum açma bilgilerini kullanırlar ve diğer sağlayıcılarla dönüşümlü olarak çalışamazlar."

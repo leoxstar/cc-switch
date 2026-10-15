@@ -31,7 +31,7 @@ use serde_json::Value;
 
 use crate::app_config::AppType;
 use crate::error::AppError;
-use crate::provider::{Provider, ProviderMeta, UsageResult};
+use crate::provider::{Provider, ProviderMeta, UsageResult, UsageScript};
 use crate::services::mcp::McpService;
 use crate::settings::CustomEndpoint;
 use crate::store::AppState;
@@ -168,6 +168,41 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex, OnceLock};
     use tempfile::TempDir;
+
+    /// MiniMax Code 官方账号行：只读、官方标记、额度走 minimax 套餐、apiKey 留空
+    /// （让后端回退读 MCode 自己的凭据），并且不写 live 配置。
+    #[test]
+    fn mcode_official_provider_is_read_only_with_quota_script() {
+        let account = crate::mcode_config::OfficialAccount {
+            build_env: "prod".to_string(),
+            region: "cn".to_string(),
+            client_id: "mcode-public".to_string(),
+            expires_at_ms: Some(1_791_965_302_979),
+        };
+        let provider = ProviderService::mcode_official_provider_from(&account);
+
+        assert_eq!(provider.id, crate::database::MCODE_OFFICIAL_PROVIDER_ID);
+        assert_eq!(provider.name, "MiniMax Official");
+        assert_eq!(provider.category.as_deref(), Some("official"));
+
+        let meta = provider.meta.as_ref().expect("official row carries meta");
+        assert_eq!(meta.read_only, Some(true));
+        assert_eq!(meta.live_config_managed, Some(false));
+        let script = meta.usage_script.as_ref().expect("usage script");
+        assert!(script.enabled);
+        assert_eq!(script.template_type.as_deref(), Some("token_plan"));
+        assert_eq!(script.coding_plan_provider.as_deref(), Some("minimax"));
+
+        assert_eq!(
+            provider.settings_config["options"]["apiKey"].as_str(),
+            Some(""),
+            "留空才会走 CLI 凭据兜底"
+        );
+        let (base_url, api_key) =
+            provider.resolve_usage_credentials(&crate::app_config::AppType::Mcode);
+        assert_eq!(base_url, "https://api.minimaxi.com/anthropic");
+        assert!(api_key.is_empty());
+    }
 
     struct TempHome {
         #[allow(dead_code)]
@@ -5379,6 +5414,70 @@ impl ProviderService {
             .live_config_managed = Some(managed);
     }
 
+    /// MiniMax Code 官方账号的只读展示行（cc-switch 不建模它，只借它显示 + 查额度）。
+    ///
+    /// MCode 用官方登录时，账号凭据在它自己的 auth store 里，**不在** `config.yaml` 的
+    /// `custom_provider` 下（那里是自定义项，且 `mcode_config::get_providers()` 只收
+    /// `kind == "custom"`）——所以官方账号在 cc-switch 里一直不可见。这里按 MCode 的
+    /// 登录状态合成一行：`category = official`（走已有官方徽章）、`readOnly`、额度走
+    /// `token_plan`/`minimax`（凭据为空 → 后端回退读 MCode 的 OAuth token）。
+    ///
+    /// 不落库：落库后它会被当成可编辑/可切换/可删除的自定义供应商，甚至被写进 MCode 的
+    /// 配置（`write_provider_to_live` 的 Mcode 分支），那是错的。
+    fn mcode_official_provider() -> Option<Provider> {
+        let account = crate::mcode_config::official_account()?;
+        Some(Self::mcode_official_provider_from(&account))
+    }
+
+    fn mcode_official_provider_from(account: &crate::mcode_config::OfficialAccount) -> Provider {
+        let mut provider = Provider::with_id(
+            crate::database::MCODE_OFFICIAL_PROVIDER_ID.to_string(),
+            "MiniMax Official".to_string(),
+            serde_json::json!({
+                "name": "MiniMax Official",
+                "kind": "custom",
+                "enabled": true,
+                "api": "anthropic-messages",
+                "options": {
+                    "baseURL": "https://api.minimaxi.com/anthropic",
+                    "apiKey": "",
+                },
+                "models": {},
+            }),
+            Some("https://platform.minimaxi.com/subscribe/token-plan".to_string()),
+        );
+        provider.category = Some("official".to_string());
+        provider.icon = Some("minimax".to_string());
+        provider.icon_color = Some("#FF6B6B".to_string());
+        provider.notes = Some(format!("{} · {}", account.build_env, account.region));
+
+        let meta = ProviderMeta {
+            read_only: Some(true),
+            // 不在 MCode 配置里：这行是合成出来的，不是写进 config.yaml 的供应商。
+            live_config_managed: Some(false),
+            usage_script: Some(UsageScript {
+                enabled: true,
+                language: "javascript".to_string(),
+                code: String::new(),
+                timeout: Some(10),
+                api_key: None,
+                base_url: None,
+                access_token: None,
+                user_id: None,
+                template_type: Some("token_plan".to_string()),
+                auto_query_interval: Some(5),
+                coding_plan_provider: Some("minimax".to_string()),
+                access_key_id: None,
+                secret_access_key: None,
+                team_organization_id: None,
+                team_project_id: None,
+            }),
+            ..Default::default()
+        };
+        provider.meta = Some(meta);
+        provider
+    }
+
     fn normalize_usage_script_credential_overrides(app_type: &AppType, provider: &mut Provider) {
         let current_credentials = provider.resolve_usage_credentials(app_type);
 
@@ -5474,6 +5573,10 @@ impl ProviderService {
                 }
                 Self::set_provider_live_config_managed(provider, native.contains_key(id));
                 state.db.save_provider("mcode", provider)?;
+            }
+            // 官方账号行放最后：上面那段循环会把 provider 写回库里，合成行不能进去。
+            if let Some(official) = Self::mcode_official_provider() {
+                saved.insert(official.id.clone(), official);
             }
             return Ok(saved);
         }

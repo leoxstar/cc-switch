@@ -716,6 +716,57 @@ fn mcode_installer_update_command(install_root: &str) -> String {
     )
 }
 
+/// Kimi Code 官方 installer 那处二进制（真身落在 `$KIMI_CODE_HOME/bin` 或默认
+/// `~/.kimi-code/bin` 下）→ 返回可执行文件路径；其它渠道返回 `None`。
+fn kimi_official_bin(path: &str, real: &str) -> Option<std::path::PathBuf> {
+    kimi_official_bin_in(
+        &kimi_extra_search_paths(
+            &crate::config::get_home_dir(),
+            std::env::var_os("KIMI_CODE_HOME"),
+        ),
+        path,
+        real,
+    )
+}
+
+/// [`kimi_official_bin`] 的纯函数内核：目录列表由调用方给，便于单测注入临时目录。
+fn kimi_official_bin_in(
+    bin_dirs: &[std::path::PathBuf],
+    path: &str,
+    real: &str,
+) -> Option<std::path::PathBuf> {
+    // 两边都 canonicalize 再比：home 是软链时 installer 写的目录与 PATH 上的入口不同形；
+    // canonicalize 失败（路径不在磁盘上）就退回原样，不因此丢掉判定。
+    let canonical = |candidate: &Path| {
+        candidate
+            .canonicalize()
+            .unwrap_or_else(|_| candidate.into())
+    };
+    let dirs: Vec<std::path::PathBuf> = bin_dirs.iter().map(|dir| canonical(dir)).collect();
+
+    // 先看真身（软链到官方 bin 的 `~/.local/bin/kimi` 也能认出来），再看入口自身。
+    [real, path].into_iter().find_map(|candidate| {
+        let candidate = Path::new(candidate);
+        let parent = candidate.parent()?;
+        dirs.contains(&canonical(parent))
+            .then(|| candidate.to_path_buf())
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kimi_upgrade_command(bin: &Path) -> String {
+    // 锚到具体那处（而不是裸 `kimi`），否则 PATH 里被遮的那份会被升级、命令行用的这份不动。
+    format!("{} upgrade", shell_single_quote(&bin.to_string_lossy()))
+}
+
+#[cfg(target_os = "windows")]
+fn kimi_upgrade_command(bin: &Path) -> String {
+    format!(
+        "{} upgrade",
+        win_quote_path_for_batch(&bin.to_string_lossy())
+    )
+}
+
 /// Codex 官方独立安装器（`install.sh` / `install.ps1`）装出的一处安装。
 ///
 /// 布局（2026-09 实测 install.sh、读 install.ps1）：发布包在
@@ -4264,6 +4315,15 @@ fn installs_anchored_command(tool: &str, installs: &[ToolInstallation]) -> Optio
             return Some(mcode_installer_update_command(&root));
         }
     }
+    // Kimi Code 官方 installer 装的是**自更新二进制**（PATH 上是 `$KIMI_CODE_HOME/bin/kimi`，
+    // 默认 `~/.kimi-code/bin`），升级由 CLI 自己做：`kimi upgrade` 下载 → 校验 sha256 → 换掉 exe。
+    // 它既不归 npm 管，也不在 `prefers_official_update` 里，所以不认这一处就会掉进
+    // `Unmanaged`（原生可执行文件 + 真身不在 node_modules）→ 前端直接跳过升级。
+    if tool == "kimi" {
+        if let Some(bin) = kimi_official_bin(&inst.path, &real) {
+            return Some(kimi_upgrade_command(&bin));
+        }
+    }
     anchored_command_from_paths(tool, &inst.path, &real)
 }
 
@@ -6718,6 +6778,81 @@ mod tests {
             assert_eq!(
                 resolve_update_command("pi", &[pi]),
                 UpdateCommand::Unmanaged
+            );
+        }
+
+        /// 官方 installer 的 kimi 是自更新二进制：锚到 `kimi upgrade`，不是 Unmanaged。
+        #[test]
+        #[serial_test::serial]
+        fn kimi_official_binary_anchors_to_self_upgrade() {
+            let dir = tempfile::tempdir().unwrap();
+            let kimi = installed(&dir, "bin/kimi", &MACH_O_64, true);
+
+            // KIMI_CODE_HOME 指向临时目录：kimi_extra_search_paths 会把它拼成 <tmp>/bin
+            #[allow(deprecated)] // set_var/remove_var：serial 测试里安全
+            std::env::set_var("KIMI_CODE_HOME", dir.path());
+            let resolved = resolve_update_command("kimi", &[kimi]);
+            #[allow(deprecated)]
+            std::env::remove_var("KIMI_CODE_HOME");
+
+            match resolved {
+                UpdateCommand::Anchored(command) => {
+                    assert!(command.ends_with(" upgrade"), "实际命令: {command}");
+                    assert!(
+                        command.contains(dir.path().to_string_lossy().as_ref()),
+                        "应当锚到官方那处: {command}"
+                    );
+                }
+                other => panic!("期望 Anchored，实际 {other:?}"),
+            }
+        }
+
+        /// 其它渠道的 kimi（不是官方 installer 的目录）仍然不归 cc-switch 管。
+        #[test]
+        #[serial_test::serial]
+        fn kimi_binary_outside_official_dir_stays_unmanaged() {
+            let dir = tempfile::tempdir().unwrap();
+            let kimi = installed(&dir, "nix-profile/bin/kimi", &MACH_O_64, true);
+
+            #[allow(deprecated)] // set_var/remove_var：serial 测试里安全
+            std::env::set_var("KIMI_CODE_HOME", dir.path().join("empty-home"));
+            let resolved = resolve_update_command("kimi", &[kimi]);
+            #[allow(deprecated)]
+            std::env::remove_var("KIMI_CODE_HOME");
+
+            assert_eq!(resolved, UpdateCommand::Unmanaged);
+        }
+
+        /// 纯函数内核：认官方 bin 目录（含软链到它的入口），不认其它目录。
+        #[test]
+        fn kimi_official_bin_matches_official_dir_only() {
+            let dir = tempfile::tempdir().unwrap();
+            let official = dir.path().join("bin");
+            std::fs::create_dir_all(&official).unwrap();
+            let exe = official.join("kimi");
+            std::fs::write(&exe, MACH_O_64).unwrap();
+
+            let exe_str = exe.to_string_lossy().to_string();
+            let dirs = vec![official.clone()];
+
+            // 入口就是官方 bin 下那个文件
+            assert_eq!(
+                kimi_official_bin_in(&dirs, &exe_str, &exe_str),
+                Some(exe.clone())
+            );
+            // 入口在别处、真身解析到官方 bin（软链安装）
+            assert_eq!(
+                kimi_official_bin_in(&dirs, "/usr/local/bin/kimi", &exe_str),
+                Some(exe.clone())
+            );
+            // 完全不在官方目录：不认
+            let elsewhere = dir.path().join("nix-profile").join("bin");
+            std::fs::create_dir_all(&elsewhere).unwrap();
+            let other = elsewhere.join("kimi");
+            std::fs::write(&other, MACH_O_64).unwrap();
+            assert_eq!(
+                kimi_official_bin_in(&dirs, &other.to_string_lossy(), &other.to_string_lossy()),
+                None
             );
         }
 

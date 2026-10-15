@@ -2475,6 +2475,17 @@ impl Database {
             ("kimi-k3", "Kimi K3", "3.00", "15.00", "0.30", "0"),
             // Kimi For Coding 套餐里 K3 的裸名（无 kimi- 前缀），同标准 list 价
             ("k3", "Kimi K3", "3.00", "15.00", "0.30", "0"),
+            // Kimi For Coding 的套餐模型别名：套餐本身按月订阅、没有官方 token 单价，
+            // 这里按套餐当前指向的模型（config.toml 里 display_name = Kimi-k2.6）估个价，
+            // 让用量页的成本列有数可看。改名时要连用量页的文案一起改。
+            (
+                "kimi-for-coding",
+                "Kimi For Coding (按 K2.6 估算)",
+                "0.95",
+                "4.00",
+                "0.16",
+                "0",
+            ),
             // 腾讯混元 (Tencent Hunyuan)（官方 CNY 1/4/0.25 按 1 USD ≈ 7.14 折算；Hy3 阶梯计价取最低档）
             ("hunyuan-hy3", "Hunyuan Hy3", "0.14", "0.56", "0.035", "0"),
             ("hy3", "Hunyuan Hy3", "0.14", "0.56", "0.035", "0"),

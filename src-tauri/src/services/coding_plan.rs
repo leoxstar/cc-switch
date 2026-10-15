@@ -1787,10 +1787,28 @@ pub async fn get_coding_plan_quota(
     }
 
     // 其余供应商：数据面 Bearer api_key。
-    // 与 balance::get_balance 一致：给出明确错误，避免 footer 显示无信息的失败
-    if api_key.trim().is_empty() {
-        return Ok(coding_plan_not_found("API key is empty"));
-    }
+    // 例外：Kimi Code / MCode 走的是 CLI 自己登录后的 OAuth token，provider 里
+    // api_key 是空的（如 `managed:kimi-code`）——读 CLI 凭据兜底，读不到再报错。
+    let cli_token = if api_key.trim().is_empty() {
+        match provider {
+            CodingPlanProvider::Kimi => crate::services::oauth_credentials::kimi_access_token(),
+            CodingPlanProvider::MiniMaxCn | CodingPlanProvider::MiniMaxEn => {
+                crate::services::oauth_credentials::minimax_access_token()
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    let Some(api_key) = cli_token.as_deref().or_else(|| {
+        let trimmed = api_key.trim();
+        (!trimmed.is_empty()).then_some(trimmed)
+    }) else {
+        return Ok(coding_plan_not_found(
+            "API key is empty and no CLI OAuth credentials were found",
+        ));
+    };
 
     match provider {
         CodingPlanProvider::Kimi => query_kimi(api_key).await,
@@ -3245,5 +3263,112 @@ mod tests {
         assert_eq!(quota.tiers[0].utilization, 26.0);
         assert_eq!(quota.tiers[1].name, TIER_WEEKLY_LIMIT);
         assert_eq!(quota.tiers[1].utilization, 5.0);
+    }
+
+    /// 手动探测：用本机 Kimi Code 已登录的 OAuth 凭据（api_key 传空）查一次套餐额度。
+    ///
+    /// 打真实网络 + 读 `~/.kimi-code/credentials/kimi-code.json`，所以默认跳过：
+    /// `cargo test --lib real_kimi_quota_from_cli_credential -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "hits the real Kimi API with the local CLI credential"]
+    async fn real_kimi_quota_from_cli_credential() {
+        let quota = super::get_coding_plan_quota(
+            "https://api.kimi.com/coding/v1",
+            "",
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("网络失败才返回 Err；凭据/鉴权问题走 Ok(success=false)");
+
+        eprintln!(
+            "success={} status={:?} error={:?} tiers={:?}",
+            quota.success, quota.credential_status, quota.error, quota.tiers
+        );
+        assert!(
+            quota.success && !quota.tiers.is_empty(),
+            "期望拿到额度分层，实际 success={} tiers={} error={:?}",
+            quota.success,
+            quota.tiers.len(),
+            quota.error
+        );
+    }
+
+    /// 手动探测：用本机 MCode 已登录的 OAuth 凭据（api_key 传空）查一次套餐额度。
+    ///
+    /// 前提：先跑一次 mcode（它会在启动时刷新 token，access token TTL 只有 1 小时，
+    /// 过期后端点返回 401 `invalid access token`）。
+    /// `cargo test --lib real_minimax_quota_from_cli_credential -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "hits the real MiniMax API with the local MCode credential (refresh it by running mcode first)"]
+    async fn real_minimax_quota_from_cli_credential() {
+        let quota = super::get_coding_plan_quota(
+            "https://api.minimaxi.com/v1",
+            "",
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("网络失败才返回 Err；凭据/鉴权问题走 Ok(success=false)");
+
+        eprintln!(
+            "success={} status={:?} error={:?} tiers={:?}",
+            quota.success, quota.credential_status, quota.error, quota.tiers
+        );
+        assert!(
+            quota.success && !quota.tiers.is_empty(),
+            "期望拿到额度分层，实际 success={} tiers={} error={:?}",
+            quota.success,
+            quota.tiers.len(),
+            quota.error
+        );
+    }
+
+    /// 真实响应形态（2026-10-15 本机直连 `api.minimaxi.com` 探测得到：general 剩余 100%/84%）：
+    /// 只取 `model_name == "general"`，utilization = 100 − 剩余百分比。
+    #[test]
+    fn minimax_real_body_maps_general_interval_and_weekly() {
+        let body = json!({
+            "model_remains": [
+                {
+                    "start_time": 1792047600000i64,
+                    "end_time": 1792065600000i64,
+                    "remains_time": 13839530i64,
+                    "current_interval_total_count": 0,
+                    "current_interval_usage_count": 0,
+                    "model_name": "general",
+                    "current_weekly_total_count": 0,
+                    "current_weekly_usage_count": 0,
+                    "weekly_start_time": 1791734400000i64,
+                    "weekly_end_time": 1792339200000i64,
+                    "weekly_remains_time": 287439530i64,
+                    "current_interval_status": 1,
+                    "current_interval_remaining_percent": 100,
+                    "current_weekly_status": 1,
+                    "current_weekly_remaining_percent": 84
+                },
+                {
+                    "model_name": "video",
+                    "current_interval_remaining_percent": 100,
+                    "current_weekly_remaining_percent": 100
+                }
+            ],
+            "base_resp": { "status_code": 0, "status_msg": "success" }
+        });
+
+        let tiers = parse_minimax_tiers(&body);
+        assert_eq!(tiers.len(), 2, "video 条目必须被跳过");
+        assert_eq!(tiers[0].name, TIER_FIVE_HOUR);
+        assert_eq!(tiers[0].utilization, 0.0);
+        assert!(tiers[0].resets_at.is_some());
+        assert_eq!(tiers[1].name, TIER_WEEKLY_LIMIT);
+        assert_eq!(tiers[1].utilization, 16.0);
+        assert!(tiers[1].resets_at.is_some());
     }
 }

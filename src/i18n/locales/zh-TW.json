@@ -2377,6 +2377,7 @@
       "grokbuild": "Grok Build",
       "pi": "Pi",
       "mcode": "MiniMax Code",
+      "kimi": "Kimi Code",
       "label": "依應用程式篩選"
     },
     "rawInputLabel": "原始",
@@ -4549,7 +4550,8 @@
       "officialStack": "官方帳號只能當預設，不能加入聚合。",
       "defaultWhileRouting": "正在路由時，預設就是路由到的那家；切換到聚合模式時可以另選。",
       "needsRoute": "需要路由：{{reason}}，不能直連。",
-      "defaultCannotRemove": "預設那家不能移除，先把別家設為預設。",
+            "readOnly": "由應用程式自身管理，CC Switch 只做顯示與額度查詢。",
+"defaultCannotRemove": "預設那家不能移除，先把別家設為預設。",
       "currentCannotRemove": "正在用的這家不能移除，先啟用別家。",
       "inUseCannotDelete": "正在用的這家不能刪除，先切到別家。",
       "noFailover": "官方帳號不進故障轉移佇列：它用客戶端自己的登入，不能和別家輪換。"
