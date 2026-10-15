@@ -172,6 +172,11 @@ pub fn sync_all_unlocked(db: &Database) -> SessionSyncResult {
         "MCode",
         crate::services::session_usage_mcode::sync_mcode_usage(db),
     );
+    merge_sync_step(
+        &mut result,
+        "Kimi",
+        crate::services::session_usage_kimi::sync_kimi_usage(db),
+    );
     notify_sync_result(&result);
     record_sync_completed(chrono::Utc::now().timestamp_millis());
     result
@@ -1371,7 +1376,6 @@ pub fn get_data_source_breakdown(db: &Database) -> Result<Vec<DataSourceSummary>
     Ok(summaries)
 }
 
-
 /// Claude 会话日志的游标判定：只认本项目目录下的 `.jsonl`。
 fn is_claude_session_cursor_path(file_path: &str, projects_dir: &Path) -> bool {
     let file_name = file_path.rsplit(['/', '\\']).next().unwrap_or_default();
@@ -1429,14 +1433,18 @@ pub(crate) fn reset_claude_session_usage_on_conn(
         && sqlite_column_exists(conn, "session_log_sync", "file_path")?
     {
         let paths = {
-            let mut statement = conn.prepare("SELECT file_path FROM session_log_sync").map_err(
-                |error| AppError::Database(format!("读取会话同步 cursor 失败: {error}")),
-            )?;
+            let mut statement = conn
+                .prepare("SELECT file_path FROM session_log_sync")
+                .map_err(|error| {
+                    AppError::Database(format!("读取会话同步 cursor 失败: {error}"))
+                })?;
             let paths = statement
                 .query_map([], |row| row.get::<_, String>(0))
                 .map_err(|error| AppError::Database(format!("查询会话同步 cursor 失败: {error}")))?
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| AppError::Database(format!("解析会话同步 cursor 失败: {error}")))?;
+                .map_err(|error| {
+                    AppError::Database(format!("解析会话同步 cursor 失败: {error}"))
+                })?;
             paths
         };
         for file_path in paths
@@ -1462,9 +1470,10 @@ impl Database {
             .map_err(|error| AppError::Database(format!("开启 Claude 重建事务失败: {error}")))?;
         match reset_claude_session_usage_on_conn(&conn, &projects_dir) {
             Ok(()) => {
-                conn.execute("RELEASE reset_claude_usage", []).map_err(|error| {
-                    AppError::Database(format!("提交 Claude 重建事务失败: {error}"))
-                })?;
+                conn.execute("RELEASE reset_claude_usage", [])
+                    .map_err(|error| {
+                        AppError::Database(format!("提交 Claude 重建事务失败: {error}"))
+                    })?;
                 Ok(())
             }
             Err(error) => {
@@ -1536,7 +1545,9 @@ mod tests {
                 |row| row.get(0),
             )?;
             let cursors: i64 =
-                conn.query_row("SELECT COUNT(*) FROM session_log_sync", [], |row| row.get(0))?;
+                conn.query_row("SELECT COUNT(*) FROM session_log_sync", [], |row| {
+                    row.get(0)
+                })?;
 
             assert_eq!(
                 (session_rows, proxy_rows, session_rollups, other_rollups),
