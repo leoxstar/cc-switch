@@ -60,6 +60,175 @@ pub(crate) fn config_path() -> PathBuf {
     data_dir().join("config.yaml")
 }
 
+/// MCode 官方账号（官方登录）的状态。
+///
+/// 官方登录的凭据**不在** `config.yaml` 里：那里只有 `custom_provider` 下的条目，而
+/// `get_providers()` 只收 `kind == "custom"` 的（官方账号那种 `kind` 被过滤掉）。
+/// 真正的登录状态在 MCode 自己的 auth store：
+/// `auth/<buildEnv>/<region>/<clientId>/auth-state.json`（status/region/expiresAtMs）
+/// 加同目录的 `auth.json`（accessToken/refreshToken）。cc-switch 只读它，不导入、不刷新。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OfficialAccount {
+    pub build_env: String,
+    pub region: String,
+    pub client_id: String,
+    /// access token 到期时间（毫秒）；MCode 那份 TTL 只有 1 小时，跑一次 MCode 才刷新。
+    pub expires_at_ms: Option<i64>,
+}
+
+/// 读官方账号状态；未登录（或没有 auth store）返回 `None`。
+/// 多份状态并存（cn/en、prod/staging）时取最近更新的那份。
+pub(crate) fn official_account() -> Option<OfficialAccount> {
+    official_account_in(&data_dir().join("auth"))
+}
+
+pub(crate) fn official_account_in(auth_root: &Path) -> Option<OfficialAccount> {
+    let mut best: Option<(u128, OfficialAccount)> = None;
+
+    for build_env in child_dirs(auth_root) {
+        for region in child_dirs(&build_env) {
+            for client in child_dirs(&region) {
+                let state_path = client.join("auth-state.json");
+                let Some(state) = read_json_file(&state_path) else {
+                    continue;
+                };
+                if state.get("status").and_then(Value::as_str) != Some("authenticated") {
+                    continue;
+                }
+                let updated = fs::metadata(&state_path)
+                    .and_then(|meta| meta.modified())
+                    .ok()
+                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|elapsed| elapsed.as_millis())
+                    .unwrap_or(0);
+                let account = OfficialAccount {
+                    build_env: dir_name(&build_env),
+                    region: state
+                        .get("region")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| dir_name(&region)),
+                    client_id: state
+                        .get("clientId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| dir_name(&client)),
+                    expires_at_ms: state.get("expiresAtMs").and_then(Value::as_i64),
+                };
+                if best.as_ref().is_none_or(|(seen, _)| updated >= *seen) {
+                    best = Some((updated, account));
+                }
+            }
+        }
+    }
+
+    best.map(|(_, account)| account)
+}
+
+/// 排序后的子目录列表（读不到就空），保证挑选结果稳定。
+fn child_dirs(root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut dirs: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    dirs.sort();
+    dirs
+}
+
+fn dir_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+fn read_json_file(path: &Path) -> Option<Value> {
+    let raw = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+#[cfg(test)]
+mod official_account_tests {
+    use super::*;
+
+    fn write_state(
+        root: &Path,
+        build_env: &str,
+        region: &str,
+        client: &str,
+        body: &str,
+    ) -> PathBuf {
+        let dir = root.join(build_env).join(region).join(client);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("auth-state.json");
+        fs::write(&path, body).unwrap();
+        path
+    }
+
+    #[test]
+    fn reads_authenticated_account() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_state(
+            tmp.path(),
+            "prod",
+            "cn",
+            "mcode-public",
+            r#"{"schemaVersion":2,"status":"authenticated","clientId":"mcode-public","region":"cn","buildEnv":"prod","expiresAtMs":1791965302979}"#,
+        );
+
+        let account = official_account_in(tmp.path()).expect("已登录应当读到状态");
+        assert_eq!(account.build_env, "prod");
+        assert_eq!(account.region, "cn");
+        assert_eq!(account.client_id, "mcode-public");
+        assert_eq!(account.expires_at_ms, Some(1791965302979));
+    }
+
+    #[test]
+    fn ignores_signed_out_and_missing_store() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_state(
+            tmp.path(),
+            "prod",
+            "cn",
+            "mcode-public",
+            r#"{"schemaVersion":2,"status":"signed_out"}"#,
+        );
+
+        assert!(official_account_in(tmp.path()).is_none());
+        assert!(official_account_in(Path::new("/nonexistent/minimax/auth")).is_none());
+    }
+
+    #[test]
+    fn picks_the_most_recently_updated_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let old = write_state(
+            tmp.path(),
+            "prod",
+            "cn",
+            "mcode-public",
+            r#"{"status":"authenticated","region":"cn","clientId":"mcode-public"}"#,
+        );
+        let new = write_state(
+            tmp.path(),
+            "prod",
+            "en",
+            "mcode-public",
+            r#"{"status":"authenticated","region":"en","clientId":"mcode-public"}"#,
+        );
+        // 手工拉开 mtime，不依赖两次写入的时钟精度
+        let past = std::time::SystemTime::now() - Duration::from_secs(60);
+        let handle = fs::File::open(&old).unwrap();
+        handle.set_modified(past).expect("设置旧状态的 mtime");
+        drop(handle);
+        let _ = new;
+
+        assert_eq!(official_account_in(tmp.path()).unwrap().region, "en");
+    }
+}
+
 fn read(path: &Path) -> Result<serde_yaml::Value, AppError> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,

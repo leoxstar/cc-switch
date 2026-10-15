@@ -608,6 +608,10 @@ pub struct ProviderMeta {
     /// `None` 表示旧数据/未知状态，`Some(false)` 表示明确仅存在于数据库中。
     #[serde(rename = "liveConfigManaged", skip_serializing_if = "Option::is_none")]
     pub live_config_managed: Option<bool>,
+    /// 只读行：内容来自应用自身的状态（如 MiniMax Code 的官方账号），不是 cc-switch
+    /// 管的供应商——不能编辑/切换/删除，界面只展示 + 查额度。合成行不落库。
+    #[serde(rename = "readOnly", skip_serializing_if = "Option::is_none")]
+    pub read_only: Option<bool>,
     /// Source format for OpenCode entries whose fields alone are ambiguous
     /// (for example, a native V2 built-in provider containing only models).
     #[serde(
